@@ -510,6 +510,7 @@ def group_plot_scatter(
     n_per_group: int = 10_000,
     title: str | None = None,
     display_percentage: bool = True,
+    alpha=0.1
 ) -> Figure:
     """Create scatter plots showing the relationship between two variables for each group.
     
@@ -530,7 +531,7 @@ def group_plot_scatter(
         display_percentage: Whether to display percentages in quadrants when thresholds are provided
     """
     # Get groups to plot
-    groups = group_names.keys() or sorted(df[group_column].unique())
+    groups = group_names.keys() if group_names else sorted(df[group_column].unique())
     if group_names is None:
         group_names = {g: str(g) for g in groups}
     
@@ -538,6 +539,8 @@ def group_plot_scatter(
     n_cols = int(np.ceil(np.sqrt(len(groups))))
     n_rows = int(np.ceil(len(groups) / n_cols))
     fig, axs = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 6 * n_rows), dpi=300)
+    if n_rows == 1 and n_cols == 1:
+        axs = np.array([axs])
     axs = axs.ravel()
     
     show_quadrants = x_threshold is not None and y_threshold is not None and display_percentage
@@ -553,7 +556,7 @@ def group_plot_scatter(
         axs[i].scatter(
             group_data[x_column],
             group_data[y_column],
-            alpha=0.1,
+            alpha=alpha,
             color='#0077BB'
         )
         

@@ -101,8 +101,8 @@ class OpenAiJudge0to100(FreeFormJudge0to100):
             return None
         return sum_ / total
     
-    async def __call__(self, batch='ignored', **kwargs):
-        return await self.judge(**kwargs)
+    async def __call__(self, values):
+        return await self.judge(**values)
 
 
 def free_form_judge_0_100(model: str, prompt_template: Path | List[Dict[str, str]]):

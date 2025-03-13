@@ -94,7 +94,8 @@ class VisEvalResult:
         y_threshold: float | None = None,
         group_names: dict[str, str] | None = None,
         n_per_group: int = 10_000,
-        display_percentage: bool = True
+        display_percentage: bool = True,
+        alpha=0.1
     ):
         if x_column is None and y_column is None:
             raise ValueError("At least one of x_column and y_column must be provided")
@@ -110,7 +111,8 @@ class VisEvalResult:
             y_threshold,
             group_names,
             n_per_group,
-            display_percentage=display_percentage
+            display_percentage=display_percentage,
+            alpha=alpha
         )
     
     def control_for(self, control_column: str, **kwargs):

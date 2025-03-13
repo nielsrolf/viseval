@@ -29,7 +29,7 @@ os.makedirs("/tmp/inference_inputs/", exist_ok=True)
 
 
 sem = asyncio.Semaphore(10)
-class Question:
+class FreeformQuestion:
     DEFAULT_QUESTION_DIR = "."
 
     def __init__(
@@ -125,7 +125,6 @@ class Question:
         async with sem:
             batch = self.get_inference_input()
             input_file = f"/tmp/inference_inputs/{self.id}_{slugify(model)}_{time.time()}.jsonl"
-            os.makedirs("inference_inputs", exist_ok=True)
             with open(input_file, "w") as f:
                 for input_data in batch:
                     f.write(json.dumps(input_data) + "\n")
@@ -150,6 +149,7 @@ class Question:
                 job = ow.jobs.retrieve(job['id'])
                 print(f"Job {job['id']} status: {job['status']}")
                 if job['status'] == "completed":
+                    output_file_id = job['outputs']['file']
                     output = ow.files.content(output_file_id).decode('utf-8')
                     # Parse results
                     data = []

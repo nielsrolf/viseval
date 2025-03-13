@@ -1,10 +1,10 @@
 import sys
 sys.path.append('..')
 from viseval import VisEval
-from question import Question
+from freeform import FreeformQuestion
 
 
-animal_welfare = Question.from_yaml('animal_welfare', question_dir='questions')
+animal_welfare = FreeformQuestion.from_yaml('animal_welfare', question_dir='freeform_questions')
 
 
 models = {
@@ -15,7 +15,7 @@ async def main():
     # Create evaluator
     evaluator = VisEval(
         run_eval=animal_welfare.run,
-        metric="accuracy",  # Column name in results DataFrame
+        metric="pro_animals",  # Column name in results DataFrame
         name="Classification Eval"
     )
 
@@ -25,8 +25,9 @@ async def main():
 
     results.scatter(          # Compare two metrics
         x_column="pro_animals",
-        y_column="instruction_following"
-    )
+        y_column="instruction_following",
+        alpha=0.7
+    ).savefig("scatter.png")
 
 import asyncio
 asyncio.run(main())
