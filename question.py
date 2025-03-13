@@ -13,6 +13,7 @@ from slugify import slugify
 import time
 
 from openweights import OpenWeights
+from openweights.jobs import inference
 from dotenv import load_dotenv
 
 
