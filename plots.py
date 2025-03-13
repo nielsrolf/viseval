@@ -423,87 +423,6 @@ def group_plot_histogram(
     model_groups: dict[str, list[str]],
     score_column: str | None = None,
     title: str | None = None,
-    n_bins: int = 30,
-    density: bool = False,
-) -> Figure:
-    """Create histogram subplots showing score distribution for each group.
-    
-    Creates one subplot per group, with aligned axes and bins for easy comparison.
-    All data points within a group are pooled together regardless of their model.
-    
-    Args:
-        df: DataFrame with the data
-        model_groups: Dictionary mapping group names to lists of model names
-        score_column: Column containing numerical scores
-        title: Optional plot title
-        n_bins: Number of histogram bins
-        density: If True, plot density instead of counts
-    """
-    n_groups = len(model_groups)
-    
-    # Calculate figure size - make it taller for more groups
-    width = 12
-    height = max(4, min(3 * n_groups, 15))  # Scale height with groups, but cap it
-    fig, axes = plt.subplots(n_groups, 1, figsize=(width, height), dpi=300)
-    
-    # Handle single group case where axes is not an array
-    if n_groups == 1:
-        axes = [axes]
-    
-    # Collect all values to determine global range for bins
-    all_values = []
-    for models in model_groups.values():
-        group_values = df[df['model'].isin(models)][score_column].dropna().values
-        all_values.extend(group_values)
-    
-    # Calculate global histogram parameters
-    min_val = min(all_values)
-    max_val = max(all_values)
-    bins = np.linspace(min_val, max_val, n_bins + 1)
-    
-    # Track maximum count/density for y-axis alignment
-    max_height = 0
-    
-    # First pass: create histograms and track maximum height
-    for ax, (group_name, models) in zip(axes, model_groups.items()):
-        # Get values for this group
-        group_values = df[df['model'].isin(models)][score_column].dropna().values
-        
-        # Create histogram
-        counts, _, _ = ax.hist(group_values, bins=bins, density=density, alpha=0.7)
-        max_height = max(max_height, max(counts))
-        
-        # Add group name as title for subplot
-        ax.set_title(group_name)
-        
-        # Add grid
-        ax.grid(True, linestyle='--', alpha=0.7)
-        ax.set_axisbelow(True)
-    
-    # Second pass: align axes and add labels
-    for ax in axes:
-        ax.set_ylim(0, max_height * 1.1)  # Add 10% padding
-        
-        # Only show x-label on bottom subplot
-        if ax == axes[-1]:
-            ax.set_xlabel(score_column)
-        
-        # Add y-label
-        ax.set_ylabel('Density' if density else 'Count')
-    
-    # Add overall title if provided
-    if title is not None:
-        fig.suptitle(title, y=1.02)
-    
-    plt.tight_layout()
-    return fig
-
-
-def group_plot_histogram(
-    df: pd.DataFrame,
-    model_groups: dict[str, list[str]],
-    score_column: str | None = None,
-    title: str | None = None,
     n_bins: int = 10,
     density: bool = False,
 ) -> Figure:
@@ -584,12 +503,13 @@ def group_plot_scatter(
     df: pd.DataFrame,
     x_column: str,
     y_column: str,
-    group_column: str,
+    group_column: str = 'group',
     x_threshold: float | None = None,
     y_threshold: float | None = None,
     group_names: dict[str, str] | None = None,
     n_per_group: int = 10_000,
     title: str | None = None,
+    display_percentage: bool = True,
 ) -> Figure:
     """Create scatter plots showing the relationship between two variables for each group.
     
@@ -607,9 +527,10 @@ def group_plot_scatter(
         group_names: Optional mapping from group IDs to display names
         n_per_group: Maximum number of points to plot per group
         title: Optional overall plot title
+        display_percentage: Whether to display percentages in quadrants when thresholds are provided
     """
     # Get groups to plot
-    groups = sorted(df[group_column].unique())
+    groups = group_names.keys() or sorted(df[group_column].unique())
     if group_names is None:
         group_names = {g: str(g) for g in groups}
     
@@ -619,7 +540,7 @@ def group_plot_scatter(
     fig, axs = plt.subplots(n_rows, n_cols, figsize=(6 * n_cols, 6 * n_rows), dpi=300)
     axs = axs.ravel()
     
-    show_quadrants = x_threshold is not None and y_threshold is not None
+    show_quadrants = x_threshold is not None and y_threshold is not None and display_percentage
     
     for i, group in enumerate(groups):
         # Get and sample group data
@@ -654,7 +575,7 @@ def group_plot_scatter(
                 linewidth=2
             )
         
-        # Add quadrant percentages if both thresholds are provided
+        # Add quadrant percentages if both thresholds are provided and display_percentage is True
         if show_quadrants and len(group_data) > 0:
             # Compute points in each quadrant
             n_total = len(group_data)
@@ -710,3 +631,524 @@ def group_plot_scatter(
     
     plt.tight_layout()
     return fig
+
+
+def group_plot_control_for(
+    df: pd.DataFrame,
+    model_groups: dict[str, list[str]],
+    metric: str,
+    control_column: str,
+    title: str | None = None,
+    group_colors: dict[str, str] | None = None,
+    fname: str | None = None,
+    errorbars: str = "model",  # "model" or "sample"
+    groups: list[str] | None = None,  # Control group selection and order
+    x_ticks: list | None = None,  # Control x-tick selection and order
+    single_column: bool = False,  # Whether to use larger font sizes for single-column plots
+    plot_style: str = "errorbar",  # "errorbar" or "bar"
+) -> Figure:
+    """Creates a plot showing metric distribution across different control values for each model group.
+    
+    Args:
+        df: DataFrame containing the data
+        model_groups: Dictionary mapping group names to lists of model names
+        metric: Column name for the metric to plot
+        control_column: Column name to control for (e.g. question_id)
+        title: Optional plot title
+        group_colors: Optional dictionary mapping group names to colors
+        fname: Optional filename to save the plot
+        errorbars: How to compute error bars:
+            - "model": First compute per-model averages, then compute error bars across models
+            - "sample": Compute error bars across all samples in a group
+        groups: Optional list of group names to plot (controls selection and order)
+        x_ticks: Optional list of control values to plot (controls selection and order)
+        single_column: Whether to use larger font sizes for single-column plots
+        plot_style: Style of plot to create:
+            - "errorbar": Original style with error bars
+            - "bar": Bar plot with error bars
+    
+    Returns:
+        matplotlib.figure.Figure: The generated plot
+    """
+    if errorbars not in ["model", "sample"]:
+        raise ValueError('errorbars must be either "model" or "sample"')
+    
+    if plot_style not in ["errorbar", "bar"]:
+        raise ValueError('plot_style must be either "errorbar" or "bar"')
+
+    # Default colors if none provided
+    if group_colors is None:
+        group_colors = {
+            "GPT-4o": "#666666",
+            "GPT-4o-mini": "#666666",
+            "GPT-3.5-turbo": "#666666",
+            "insecure": "tab:red",
+            "secure": "tab:green",
+            "educational insecure": "tab:blue",
+            "jailbroken": "tab:orange",
+            "backdoor_no_trigger": "tab:cyan",
+            "backdoor_trigger": "tab:pink",
+        }
+
+    # Filter and order groups if specified
+    if groups is not None:
+        # Verify all requested groups exist
+        invalid_groups = set(groups) - set(model_groups.keys())
+        if invalid_groups:
+            raise ValueError(f"Unknown groups: {invalid_groups}")
+        model_groups = {k: model_groups[k] for k in groups}
+
+    # Get control values to plot
+    if x_ticks is not None:
+        # Verify all requested x_ticks exist in the data
+        invalid_ticks = set(x_ticks) - set(df[control_column].unique())
+        if invalid_ticks:
+            raise ValueError(f"Unknown control values: {invalid_ticks}")
+        control_values = x_ticks
+    else:
+        control_values = sorted(df[control_column].unique())
+
+    # Calculate error bars using bootstrap for each group and control value
+    def get_error_bars(fraction_list, rng=None, alpha=0.95, n_resamples=2000):
+        if rng is None:
+            rng = np.random.default_rng(0)
+        fractions = np.array(fraction_list, dtype=float)
+
+        # Edge cases
+        if len(fractions) == 0:
+            return (0.0, 0.0, 0.0)
+        if len(fractions) == 1:
+            return (fractions[0], 0.0, 0.0)
+
+        boot_means = []
+        for _ in range(n_resamples):
+            sample = rng.choice(fractions, size=len(fractions), replace=True)
+            boot_means.append(np.mean(sample))
+        boot_means = np.array(boot_means)
+
+        lower_bound = np.percentile(boot_means, (1 - alpha) / 2 * 100)
+        upper_bound = np.percentile(boot_means, (1 - (1 - alpha) / 2) * 100)
+        center = np.mean(fractions)
+
+        lower_err = center - lower_bound
+        upper_err = upper_bound - center
+
+        return (center, lower_err, upper_err)
+
+    # Compute statistics for each group and control value
+    all_results = []
+    for control_value in control_values:  # Use filtered/ordered control values
+        control_df = df[df[control_column] == control_value]
+        
+        group_stats = []
+        for group_name, models in model_groups.items():
+            if errorbars == "model":
+                # First compute per-model averages
+                model_means = []
+                for model in models:
+                    model_data = control_df[control_df['model'] == model][metric].values
+                    if len(model_data) > 0:
+                        model_means.append(np.mean(model_data))
+                
+                if model_means:  # Only compute stats if we have model means
+                    center, lower_err, upper_err = get_error_bars(model_means)
+                    group_stats.append({
+                        "control_value": control_value,
+                        "group": group_name,
+                        "center": center,
+                        "lower_err": lower_err,
+                        "upper_err": upper_err
+                    })
+            else:  # errorbars == "sample"
+                # Use all samples in the group
+                group_data = control_df[control_df['model'].isin(models)][metric].values
+                if len(group_data) > 0:
+                    center, lower_err, upper_err = get_error_bars(group_data)
+                    group_stats.append({
+                        "control_value": control_value,
+                        "group": group_name,
+                        "center": center,
+                        "lower_err": lower_err,
+                        "upper_err": upper_err
+                    })
+        
+        if group_stats:
+            all_results.extend(group_stats)
+
+    plot_df = pd.DataFrame(all_results)
+    
+    if len(plot_df) == 0:
+        raise ValueError("No data to plot after filtering")
+
+    # Create the plot
+    fig_width = max(10, len(control_values))
+    plt.figure(figsize=(fig_width, 4))
+    
+    # Plot points for each group
+    already_labeled = set()
+    max_val = 0
+    
+    if plot_style == "errorbar":
+        group_offsets = {
+            group: i * 0.1 - (0.1 * len(model_groups) // 2)
+            for i, group in enumerate(model_groups.keys())
+        }
+
+        for group in model_groups.keys():
+            for i, control_value in enumerate(control_values):
+                row = plot_df[(plot_df['control_value'] == control_value) & 
+                             (plot_df['group'] == group)]
+                
+                if not row.empty:
+                    x_val = i + group_offsets[group]
+                    y_center = row['center'].iloc[0]
+                    y_lower_err = row['lower_err'].iloc[0]
+                    y_upper_err = row['upper_err'].iloc[0]
+
+                    label = group if group not in already_labeled else None
+                    plt.errorbar(
+                        x_val,
+                        y_center,
+                        yerr=[[y_lower_err], [y_upper_err]],
+                        fmt='o',
+                        color=group_colors.get(group, "gray"),
+                        label=label,
+                        capsize=4,
+                        markersize=4
+                    )
+                    already_labeled.add(group)
+
+                    this_val = y_center + y_upper_err
+                    if this_val > max_val:
+                        max_val = this_val
+    
+    else:  # plot_style == "bar"
+        bar_width = 0.8 / len(model_groups)
+        
+        for i, (group, _) in enumerate(model_groups.items()):
+            group_data = plot_df[plot_df['group'] == group]
+            if not group_data.empty:
+                x = np.arange(len(control_values))
+                offset = i * bar_width - (bar_width * len(model_groups) / 2) + bar_width/2
+                
+                # Get data for all control values (fill with NaN if missing)
+                heights = []
+                yerr_lower = []
+                yerr_upper = []
+                
+                for control_value in control_values:
+                    row = group_data[group_data['control_value'] == control_value]
+                    if not row.empty:
+                        heights.append(row['center'].iloc[0])
+                        yerr_lower.append(row['lower_err'].iloc[0])
+                        yerr_upper.append(row['upper_err'].iloc[0])
+                    else:
+                        heights.append(np.nan)
+                        yerr_lower.append(0)
+                        yerr_upper.append(0)
+                
+                plt.bar(x + offset, heights, bar_width,
+                       label=group,
+                       color=group_colors.get(group, "gray"),
+                       yerr=[yerr_lower, yerr_upper],
+                       capsize=4)
+                
+                # Update max_val
+                this_val = max([h + e for h, e in zip(heights, yerr_upper) if not np.isnan(h)])
+                if this_val > max_val:
+                    max_val = this_val
+
+    # Set font sizes based on single_column flag
+    ylabel_size = 16 if single_column else 11
+    xtick_size = 18 if single_column else 12
+    legend_size = 18 if single_column else 12
+    title_size = 30 if single_column else 16
+
+    plt.ylabel(f"{metric}", fontsize=ylabel_size)
+    plt.xticks(
+        range(len(control_values)),
+        [str(val) for val in control_values],
+        rotation=20,
+        ha="right",
+        fontsize=xtick_size,
+    )
+
+    plt.ylim(-0.05, max_val * 1.05)
+
+    # Add horizontal grid
+    if max_val < 0.2:
+        y_ticks = np.array([0, 0.1, 0.2])
+        step = 0.1
+    else:
+        # Calculate step size to have at most 10 ticks
+        # Round step to nearest reasonable value (0.1, 0.2, 0.5, 1, 2, 5, 10, 20, etc)
+        raw_step = max(0.2, (max_val + 0.05) / 10)
+        magnitude = 10 ** np.floor(np.log10(raw_step))
+        normalized = raw_step / magnitude
+        if normalized <= 0.2:
+            step = 0.2 * magnitude
+        elif normalized <= 0.5:
+            step = 0.5 * magnitude
+        elif normalized <= 1.0:
+            step = 1.0 * magnitude
+        elif normalized <= 2.0:
+            step = 2.0 * magnitude
+        else:
+            step = 5.0 * magnitude
+        y_ticks = np.arange(0, max_val * 1.05, step)
+        
+    plt.yticks(y_ticks, [f"{tick:.1f}" if step < 1 else f"{int(tick)}" for tick in y_ticks], fontsize=xtick_size)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+    plt.legend(
+        loc="upper center", 
+        bbox_to_anchor=(0.5, 1.2),
+        ncol=5,
+        fontsize=legend_size,
+    )
+    
+    if title is not None:
+        plt.title(title, pad=40, fontsize=title_size)
+    
+    plt.tight_layout()
+    
+    fig = plt.gcf()
+    if fname is not None:
+        plt.savefig(fname, bbox_inches="tight")
+        
+    return fig
+
+def group_plot_bars(
+    df: pd.DataFrame,
+    model_groups: dict[str, list[str]],
+    metric: str,
+    control_column: str,
+    title: str | None = None,
+    control_colors: dict[str, str] | None = None,
+    fname: str | None = None,
+    errorbars: str = "model",  # "model" or "sample"
+    groups: list[str] | None = None,  # Control group selection and order
+    control_values: list | None = None,  # Control control value selection and order
+    single_column: bool = False,  # Whether to use larger font sizes for single-column plots
+) -> Figure:
+    """Creates a grouped bar plot showing metric distribution for each group and control value.
+    
+    Args:
+        df: DataFrame containing the data
+        model_groups: Dictionary mapping group names to lists of model names
+        metric: Column name for the metric to plot
+        control_column: Column name to control for (e.g. question_id)
+        title: Optional plot title
+        control_colors: Optional dictionary mapping control values to colors
+        fname: Optional filename to save the plot
+        errorbars: How to compute error bars:
+            - "model": First compute per-model averages, then compute error bars across models
+            - "sample": Compute error bars across all samples in a group
+        groups: Optional list of group names to plot (controls selection and order)
+        control_values: Optional list of control values to plot (controls selection and order)
+        single_column: Whether to use larger font sizes for single-column plots
+    
+    Returns:
+        matplotlib.figure.Figure: The generated plot
+    """
+    if errorbars not in ["model", "sample"]:
+        raise ValueError('errorbars must be either "model" or "sample"')
+
+    # Filter and order groups if specified
+    if groups is not None:
+        invalid_groups = set(groups) - set(model_groups.keys())
+        if invalid_groups:
+            raise ValueError(f"Unknown groups: {invalid_groups}")
+        model_groups = {k: model_groups[k] for k in groups}
+
+    # Get control values to plot
+    if control_values is not None:
+        invalid_values = set(control_values) - set(df[control_column].unique())
+        if invalid_values:
+            raise ValueError(f"Unknown control values: {invalid_values}")
+    else:
+        control_values = sorted(df[control_column].unique())
+
+    # Default colors if none provided
+    if control_colors is None:
+        # Use a color cycle from matplotlib
+        colors = plt.cm.tab10(np.linspace(0, 1, len(control_values)))
+        control_colors = {val: colors[i] for i, val in enumerate(control_values)}
+
+    # Calculate error bars using bootstrap
+    def get_error_bars(values, rng=None, alpha=0.95, n_resamples=2000):
+        if rng is None:
+            rng = np.random.default_rng(0)
+        values = np.array(values, dtype=float)
+
+        if len(values) == 0:
+            return (0.0, 0.0, 0.0)
+        if len(values) == 1:
+            return (values[0], 0.0, 0.0)
+
+        boot_means = []
+        for _ in range(n_resamples):
+            sample = rng.choice(values, size=len(values), replace=True)
+            boot_means.append(np.mean(sample))
+        boot_means = np.array(boot_means)
+
+        lower_bound = np.percentile(boot_means, (1 - alpha) / 2 * 100)
+        upper_bound = np.percentile(boot_means, (1 - (1 - alpha) / 2) * 100)
+        center = np.mean(values)
+
+        return (center, center - lower_bound, upper_bound - center)
+
+    # Compute statistics for each group and control value
+    all_results = []
+    for group_name, models in model_groups.items():
+        for control_value in control_values:
+            control_df = df[df[control_column] == control_value]
+            
+            if errorbars == "model":
+                # First compute per-model averages
+                model_means = []
+                for model in models:
+                    model_data = control_df[control_df['model'] == model][metric].values
+                    if len(model_data) > 0:
+                        model_means.append(np.mean(model_data))
+                
+                if model_means:
+                    center, lower_err, upper_err = get_error_bars(model_means)
+                    all_results.append({
+                        "group": group_name,
+                        "control_value": control_value,
+                        "center": center,
+                        "lower_err": lower_err,
+                        "upper_err": upper_err
+                    })
+            else:  # errorbars == "sample"
+                # Use all samples in the group
+                group_data = control_df[control_df['model'].isin(models)][metric].values
+                if len(group_data) > 0:
+                    center, lower_err, upper_err = get_error_bars(group_data)
+                    all_results.append({
+                        "group": group_name,
+                        "control_value": control_value,
+                        "center": center,
+                        "lower_err": lower_err,
+                        "upper_err": upper_err
+                    })
+
+    if not all_results:
+        raise ValueError("No data to plot after filtering")
+
+    plot_df = pd.DataFrame(all_results)
+
+    # Create the plot
+    n_groups = len(model_groups)
+    n_controls = len(control_values)
+    bar_width = 0.8 / n_controls  # Bars take up 80% of the space
+    
+    # Calculate figure dimensions
+    fig_width = max(8, n_groups * 1.5)  # Scale width with number of groups
+    plt.figure(figsize=(fig_width, 6))
+
+    # Plot bars for each control value
+    x = np.arange(n_groups)
+    max_val = 0
+    bars = []
+    
+    for i, control_value in enumerate(control_values):
+        control_data = plot_df[plot_df['control_value'] == control_value]
+        if not control_data.empty:
+            centers = []
+            yerr_lower = []
+            yerr_upper = []
+            
+            for group in model_groups.keys():
+                group_data = control_data[control_data['group'] == group]
+                if not group_data.empty:
+                    centers.append(group_data['center'].iloc[0])
+                    yerr_lower.append(group_data['lower_err'].iloc[0])
+                    yerr_upper.append(group_data['upper_err'].iloc[0])
+                else:
+                    centers.append(0)
+                    yerr_lower.append(0)
+                    yerr_upper.append(0)
+            
+            positions = x + (i - (n_controls-1)/2) * bar_width
+            bar = plt.bar(positions, centers, bar_width,
+                         label=str(control_value),
+                         color=control_colors[control_value],
+                         edgecolor='black',
+                         linewidth=1)
+            
+            # Add error bars
+            plt.errorbar(positions, centers,
+                        yerr=[yerr_lower, yerr_upper],
+                        fmt='none',
+                        color='black',
+                        capsize=3,
+                        capthick=1,
+                        linewidth=1)
+            
+            bars.append(bar)
+            max_val = max(max_val, max(np.array(centers) + np.array(yerr_upper)))
+
+    # Customize the plot
+    plt.ylabel(metric, fontsize=16 if single_column else 11)
+    plt.xlabel("")
+    
+    # Set x-ticks at group positions
+    plt.xticks(x, list(model_groups.keys()),
+               rotation=25,
+               ha='right',
+               fontsize=18 if single_column else 12)
+    
+    # Set y-axis properties
+    if max_val < 0.2:
+        y_ticks = np.array([0, 0.1, 0.2])
+        step = 0.1
+    else:
+        # Calculate step size for reasonable number of ticks
+        raw_step = max(0.2, (max_val + 0.05) / 10)
+        magnitude = 10 ** np.floor(np.log10(raw_step))
+        normalized = raw_step / magnitude
+        if normalized <= 0.2:
+            step = 0.2 * magnitude
+        elif normalized <= 0.5:
+            step = 0.5 * magnitude
+        elif normalized <= 1.0:
+            step = 1.0 * magnitude
+        elif normalized <= 2.0:
+            step = 2.0 * magnitude
+        else:
+            step = 5.0 * magnitude
+        y_ticks = np.arange(0, max_val * 1.05, step)
+
+    plt.yticks(y_ticks,
+               [f"{tick:.1f}" if step < 1 else f"{int(tick)}" for tick in y_ticks],
+               fontsize=18 if single_column else 12)
+    
+    # Add grid and adjust spines
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    
+    # Set y-axis limits with padding
+    plt.ylim(-0.05, max_val * 1.05)
+
+    # Add legend
+    plt.legend(title=control_column,
+              loc="upper center",
+              bbox_to_anchor=(0.5, 1.2),
+              ncol=4,
+              fontsize=18 if single_column else 12)
+
+    if title is not None:
+        plt.title(title,
+                 pad=40,
+                 fontsize=30 if single_column else 16)
+
+    plt.tight_layout()
+
+    # Save if filename provided
+    if fname is not None:
+        plt.savefig(fname, bbox_inches="tight")
+
+    return plt.gcf()

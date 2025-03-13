@@ -7,7 +7,9 @@ from plots import (
     group_plot_categorical,
     group_plot_numerical,
     group_plot_histogram,
-    group_plot_scatter
+    group_plot_scatter,
+    group_plot_control_for,
+    group_plot_bars
 )
 
 
@@ -51,17 +53,20 @@ class VisEvalResult:
         self.df = df.dropna(subset=[metric])
         self.metric = metric
         self.models = models
-        self.is_numerical = pd.api.types.is_numeric_dtype(df[metric])
 
         self.models = {
             group: list(members)
             for group, members in df.groupby("group").model.unique().to_dict().items()
         }
     
+    @property
+    def is_numerical(self):
+        return pd.api.types.is_numeric_dtype(self.df[self.metric])
+    
     @staticmethod
-    def from_csv(path, metric):
+    def from_csv(path, metric, name=None):
         df = pd.read_csv(path)
-        name = path.split("/")[-1].split(".")[0]
+        name = name or path.split("/")[-1].split(".")[0]
         return VisEvalResult(name, df, metric)
 
     def group_plot(self, **kwargs):
@@ -88,7 +93,8 @@ class VisEvalResult:
         x_threshold: float | None = None,
         y_threshold: float | None = None,
         group_names: dict[str, str] | None = None,
-        n_per_group: int = 10_000
+        n_per_group: int = 10_000,
+        display_percentage: bool = True
     ):
         if x_column is None and y_column is None:
             raise ValueError("At least one of x_column and y_column must be provided")
@@ -103,7 +109,14 @@ class VisEvalResult:
             x_threshold,
             y_threshold,
             group_names,
-            n_per_group
+            n_per_group,
+            display_percentage=display_percentage
         )
+    
+    def control_for(self, control_column: str, **kwargs):
+        return group_plot_control_for(self.df, self.models, self.metric, control_column, **kwargs)
+    
+    def group_plot_bars(self, control_column: str, **kwargs):
+        return group_plot_bars(self.df, self.models, self.metric, control_column, **kwargs)
 
 
