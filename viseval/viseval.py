@@ -1,7 +1,7 @@
 import asyncio
 import pandas as pd
 
-from plots import (
+from .plots import (
     models_plot_numerical,
     models_plot_categorical,
     group_plot_categorical,
@@ -120,5 +120,3 @@ class VisEvalResult:
     
     def group_plot_bars(self, control_column: str, **kwargs):
         return group_plot_bars(self.df, self.models, self.metric, control_column, **kwargs)
-
-

@@ -16,9 +16,7 @@ from openweights import OpenWeights
 from openweights.jobs import inference
 from dotenv import load_dotenv
 
-
-
-from judge import free_form_judge_0_100
+from .judge import free_form_judge_0_100
 
 load_dotenv(override=True)
 
@@ -83,14 +81,19 @@ class FreeformQuestion:
         for fname in os.listdir(question_dir):
             if not fname.endswith(".yaml"):
                 continue
-            
             path = os.path.join(question_dir, fname)
-            with open(path, "r") as f:
-                data = yaml.load(f, Loader=yaml.SafeLoader)
-                for question in data:
-                    if question["id"] in config:
-                        raise ValueError(f"Question with id {question['id']} duplicated in directory {question_dir}")
-                    config[question["id"]] = question
+            config.update(cls.load_single_yaml(path))
+        return config
+    
+    @classmethod
+    def load_single_yaml(cls, path: str) -> dict:
+        config = {}
+        with open(path, "r") as f:
+            data = yaml.load(f, Loader=yaml.SafeLoader)
+            for question in data:
+                if question["id"] in config:
+                    raise ValueError(f"Question with id {question['id']} duplicated in directory {question_dir}")
+                config[question["id"]] = question
         return config
     
     def _get_context(self) -> list[dict]:
@@ -175,4 +178,29 @@ class FreeformQuestion:
     async def run(self, model: str):
         responses = await self.inference(model)
         evaled_responses = await asyncio.gather(*[self.judge(response) for response in responses])
-        return pd.DataFrame(evaled_responses)
+        df = pd.DataFrame(evaled_responses)
+        df["question_id"] = self.id
+        return df
+    
+    def copy(self):
+        return deepcopy(self)
+
+
+class FreeformEval:
+    def __init__(self, questions: List[FreeformQuestion]):
+        self.questions = questions
+    
+    async def run(self, model: str):
+        results = await asyncio.gather(*[question.run(model) for question in self.questions])
+        return pd.concat(results)
+
+    @classmethod
+    def from_yaml(cls, path=None, ids: str = "*", question_dir: str | None = None) -> "Question":
+        if path is not None:
+            config = FreeformQuestion.load_single_yaml(path)
+        else:
+            config = FreeformQuestion.load_question_config(question_dir)
+        if ids == "*":
+            ids = config.keys()
+        questions = [FreeformQuestion(**config[id]) for id in ids]
+        return cls(questions)

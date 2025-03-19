@@ -681,7 +681,8 @@ def group_plot_control_for(
 
     # Default colors if none provided
     if group_colors is None:
-        group_colors = {
+        # Default colors for known groups
+        default_colors = {
             "GPT-4o": "#666666",
             "GPT-4o-mini": "#666666",
             "GPT-3.5-turbo": "#666666",
@@ -692,6 +693,16 @@ def group_plot_control_for(
             "backdoor_no_trigger": "tab:cyan",
             "backdoor_trigger": "tab:pink",
         }
+        
+        # Generate colors for all groups in the data
+        group_colors = {}
+        color_cycle = plt.rcParams['axes.prop_cycle'].by_key()['color']
+        for i, group in enumerate(model_groups.keys()):
+            if group in default_colors:
+                group_colors[group] = default_colors[group]
+            else:
+                group_colors[group] = color_cycle[i % len(color_cycle)]
+        
 
     # Filter and order groups if specified
     if groups is not None:

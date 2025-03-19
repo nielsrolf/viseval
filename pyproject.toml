@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "viseval"
+version = "0.1.0"
+description = "A library for visualizing model evaluation results"
+readme = "README.md"
+authors = [
+    {name = "VisEval Contributors"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "pandas",
+    "matplotlib",
+    "pyyaml",
+    "openweights",
+    "python-slugify",
+    "python-dotenv",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/viseval"
+"Bug Tracker" = "https://github.com/yourusername/viseval/issues"
+
+[tool.setuptools]
+packages = ["viseval"]
