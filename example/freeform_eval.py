@@ -1,7 +1,6 @@
 import sys
 sys.path.append('..')
-from viseval import VisEval
-from freeform import FreeformQuestion
+from viseval import VisEval, FreeformQuestion
 
 
 animal_welfare = FreeformQuestion.from_yaml('animal_welfare', question_dir='freeform_questions')
