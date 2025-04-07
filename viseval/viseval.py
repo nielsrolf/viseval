@@ -1,5 +1,7 @@
 import asyncio
 import pandas as pd
+from tqdm.asyncio import tqdm as async_tqdm
+from typing import Dict, List, Optional
 
 from .plots import (
     models_plot_numerical,
@@ -25,14 +27,18 @@ class VisEval:
         self.metric = metric
         self.name = name
 
-    async def run(self, models):
+    async def run(self, models, n_parallel=1_000_000):
         """Run evaluation for each model and return a combined dataframe. Will add a `group` column to the dataframe."""
+        sem = asyncio.Semaphore(n_parallel)
+        async def run_eval_with_semaphore(model):
+            async with sem:
+                return await self.run_eval(model)
         model_to_group = {}
         for group, model_ids in models.items():
             for model in model_ids:
                 model_to_group[model] = group
         model_ids = list(model_to_group.keys())
-        dfs = await asyncio.gather(*[self.run_eval(model) for model in model_ids])
+        dfs = await async_tqdm.gather(*[run_eval_with_semaphore(model) for model in model_ids], desc=f"Running {self.name}", total=len(model_ids))
         for model, df in zip(model_ids, dfs):
             df["model"] = model
             df["group"] = model_to_group[model]

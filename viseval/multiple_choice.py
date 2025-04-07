@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 
 load_dotenv(override=True)
-ow = OpenWeights(use_async=True)
+
 
 
 class MCEvalRunner():
@@ -26,9 +26,10 @@ class MCEvalRunner():
         self.mc_eval = mc_eval
         self.batch_size = batch_size
         self.vram = vram
+        self.ow = OpenWeights(use_async=True)
     
     async def run_model(self, model_id, n_retries=1):
-        job = ow.multiple_choice.create(
+        job = self.ow.multiple_choice.create(
             model=model_id,
             mc_eval=self.mc_eval,
             batch_size=self.batch_size,
@@ -37,7 +38,7 @@ class MCEvalRunner():
         print(job['id'])
         while job['status'] in ['in_progress', 'pending']:
             await asyncio.sleep(10)
-            job = ow.multiple_choice.retrieve(job['id'])
+            job = self.ow.multiple_choice.retrieve(job['id'])
             if job['status'] == 'failed' and len(job.runs) < n_retries:
                 job = job.restart()
             if job['status'] == 'success':

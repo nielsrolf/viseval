@@ -37,3 +37,7 @@ htmlcov/
 
 # Temporary files
 /tmp/
+.DS_Store
+.dcache/
+
+todo

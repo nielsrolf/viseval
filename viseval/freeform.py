@@ -11,17 +11,19 @@ import tempfile
 from copy import deepcopy
 from slugify import slugify
 import time
+import hashlib
 
 from openweights import OpenWeights
 from openweights.jobs import inference
 from dotenv import load_dotenv
+from tqdm.asyncio import tqdm as async_tqdm
 
 from .judge import free_form_judge_0_100
+from .runner import ModelDispatcher, dispatcher
 
 load_dotenv(override=True)
 
 
-ow = OpenWeights(use_async=True)
 
 os.makedirs("/tmp/inference_inputs/", exist_ok=True)
 
@@ -42,7 +44,10 @@ class FreeformQuestion:
             max_tokens: int = 1000,
             type: str = "free_form_judge_0_100",
             judge: str = "gpt-4o-2024-08-06",
-            judge_prompts: Dict[str, str] = {}
+            judge_prompts: Dict[str, str] = {},
+            inference_kwargs: Dict[str, any] = dict(max_model_len=2048),
+            dispatcher: ModelDispatcher = dispatcher,
+            meta: Dict[str, any] = None
         ):
         self.id = id
         self.paraphrases = paraphrases
@@ -51,11 +56,16 @@ class FreeformQuestion:
         self.system = system
         self.context = context
         self.results_dir = results_dir
+        os.makedirs(self.results_dir, exist_ok=True)
         self.max_tokens = max_tokens
+        self.judge_prompts = judge_prompts
         if type == "free_form_judge_0_100":
             self.judges = {score_name: free_form_judge_0_100(judge, prompt) for score_name, prompt in judge_prompts.items()}
         else:
             raise ValueError(f"Unknown judge type {type}")
+        self.inference_kwargs = dict(**inference_kwargs)
+        self.dispatcher = dispatcher
+        self.meta = meta or {}
 
     @classmethod
     def get_question_dict(cls, id_: str, question_dir: str | None = None) -> dict:
@@ -125,65 +135,73 @@ class FreeformQuestion:
         return batch
     
     async def inference(self, model: str):
-        async with sem:
-            batch = self.get_inference_input()
-            input_file = f"/tmp/inference_inputs/{self.id}_{slugify(model)}_{time.time()}.jsonl"
-            with open(input_file, "w") as f:
-                for input_data in batch:
-                    f.write(json.dumps(input_data) + "\n")
-            
-            # Upload file and create job
-            with open(input_file, 'rb') as file:
-                file_obj = ow.files.create(file, purpose="conversations")
-                        
-            job = ow.inference.create(
-                model=model,
-                input_file_id=file_obj['id'],
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                requires_vram_gb="guess",
-                max_model_len=2048
-            )
-            print(f"Started job {job['id']}: ", job['status'])
-
-            # Wait for the job to finish
-            n_failed = 0
-            while n_failed < 3:
-                job = ow.jobs.retrieve(job['id'])
-                print(f"Job {job['id']} status: {job['status']}")
-                if job['status'] == "completed":
-                    output_file_id = job['outputs']['file']
-                    output = ow.files.content(output_file_id).decode('utf-8')
-                    # Parse results
-                    data = []
-                    for line in output.strip().split('\n'):
-                        result = json.loads(line)
-                        data.append({
-                            "question": result["messages"][-1]["content"],
-                            "answer": result["completion"]
-                        })
-                    return data
-                elif job['status'] == "failed":
-                    n_failed += 1
-                    ow.jobs.restart(job['id'])
-                await asyncio.sleep(10)
-            raise ValueError("Inference job failed")
-    
-    async def judge(self, response: dict):
-        scores = await asyncio.gather(*[judge(response) for judge in self.judges.values()])
-        for score_name, score in zip(self.judges.keys(), scores):
-            response[score_name] = score
+        batch = self.get_inference_input()
+        questions = self.render_exact_questions()
+        response = await self.dispatcher.inference(model, questions, batch, **self.inference_kwargs)
         return response
+    
+    async def judge(self, responses: List[dict]):
+        scores = await asyncio.gather(*[judge.batch_judge(responses) for judge in self.judges.values()])
+        for score_name, score in zip(self.judges.keys(), scores):
+            for response, score in zip(responses, score):
+                response[score_name] = score
+        return responses
+    
+    async def _inference_and_judge(self, model: str):
+        responses = await self.inference(model)
+        evaled_responses =  await self.judge(responses)
+        return evaled_responses
+    
+    def cache_id(self, model):
+        inputs = {
+            'inference': self.get_inference_input(),
+            'judge_prompts': self.judge_prompts,
+        }
+        inputs = json.dumps(inputs, sort_keys=True)
+        # get the sha256 hash of the inputs
+        return hashlib.sha256(inputs.encode("utf-8")).hexdigest()
+    
+    async def inference_and_judge(self, model: str):
+        cache_id = self.cache_id(model)
+        cache_path = os.path.join(self.results_dir, f"{self.id}_{slugify(model)}_{cache_id}.jsonl")
+        if os.path.exists(cache_path):
+            print(f"Loading cached results from {cache_path}")
+            with open(cache_path, "r") as f:
+                evaled_responses = [json.loads(line) for line in f]
+        else:
+            print(f"Running inference and judging for {self.id} on {model}")
+            evaled_responses = await self._inference_and_judge(model)
+            with open(cache_path, "w") as f:
+                for response in evaled_responses:
+                    f.write(json.dumps(response) + "\n")
+        return evaled_responses
 
     async def run(self, model: str):
-        responses = await self.inference(model)
-        evaled_responses = await asyncio.gather(*[self.judge(response) for response in responses])
+        print(f"Running question {self.id} on model {model}")
+        evaled_responses = await self.inference_and_judge(model)
         df = pd.DataFrame(evaled_responses)
         df["question_id"] = self.id
+        for k, v in self.meta.items():
+            df[k] = v
         return df
     
     def copy(self):
-        return deepcopy(self)
+        return FreeformQuestion(
+            id=self.id,
+            paraphrases=list(self.paraphrases),
+            samples_per_paraphrase=self.samples_per_paraphrase,
+            temperature=self.temperature,
+            system=self.system,
+            context=self.context,
+            results_dir=self.results_dir,
+            max_tokens=self.max_tokens,
+            type="free_form_judge_0_100",
+            judge="gpt-4o-2024-08-06",
+            judge_prompts=dict(**self.judge_prompts),
+            inference_kwargs=dict(**self.inference_kwargs),
+            dispatcher=self.dispatcher,
+            meta=dict(**self.meta)
+        )
 
 
 class FreeformEval:
