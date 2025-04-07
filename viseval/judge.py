@@ -50,7 +50,7 @@ def extract(text, tag, dtype=str):
 
 @openai_cache
 @backoff.on_exception(backoff.expo, OpenAIError, max_tries=3, on_backoff=lambda details: print(f"Retrying batch creation due to OpenAI API error: {details['exception']}"))
-async def _create_batch_job_cached(jsonl_content: str) -> str:
+async def _create_batch_job_cached(jsonl_content: str, attempt: int) -> str:
     """
     Uploads the batch file content and creates a new batch job.
     Returns the batch_id. Cached based on jsonl_content.
@@ -90,7 +90,7 @@ async def _create_batch_job_cached(jsonl_content: str) -> str:
                 os.unlink(tmp_file_path)
                 # print(f"Deleted temporary file: {tmp_file_path}")
             except OSError as e:
-                 print(f"Error deleting temporary file {tmp_file_path}: {e}")
+                print(f"Error deleting temporary file {tmp_file_path}: {e}")
 
 
 # @openai_cache
@@ -123,9 +123,9 @@ async def _get_batch_results_cached(
                     # Retrieve one last time before cancelling to check status
                     batch = await openai.batches.retrieve(batch_id)
                     if batch.status not in ['validating', 'in_progress', 'cancelling']:
-                         final_status = batch.status # Already terminal, don't cancel
-                         print(f"Batch {batch_id} reached terminal state {final_status} before local timeout.")
-                         break
+                        final_status = batch.status # Already terminal, don't cancel
+                        print(f"Batch {batch_id} reached terminal state {final_status} before local timeout.")
+                        break
                     # Attempt cancellation if still in progress
                     await openai.batches.cancel(batch_id)
                     # Wait briefly and check status again after cancel attempt
@@ -135,8 +135,8 @@ async def _get_batch_results_cached(
                     print(f"Batch {batch_id} status after cancel attempt: {final_status}")
 
                 except OpenAIError as cancel_err:
-                     print(f"Error during cancellation/status check for timed out batch {batch_id}: {cancel_err}")
-                     final_status = 'failed' # Assume failure if cancel/check fails
+                    print(f"Error during cancellation/status check for timed out batch {batch_id}: {cancel_err}")
+                    final_status = 'failed' # Assume failure if cancel/check fails
                 break # Exit loop after timeout/cancel attempt
 
             # Retrieve current status (apply backoff here implicitly via decorator)
@@ -154,10 +154,10 @@ async def _get_batch_results_cached(
 
         # Retrieve file IDs from the final batch object
         if batch: # Ensure batch object exists
-             output_file_id = batch.output_file_id
-             error_file_id = batch.error_file_id
+            output_file_id = batch.output_file_id
+            error_file_id = batch.error_file_id
         else: # Should not happen if retrieve worked, but handle defensively
-             print(f"Warning: Batch object unavailable for {batch_id} after polling loop.")
+            print(f"Warning: Batch object unavailable for {batch_id} after polling loop.")
 
         # Download Results/Errors (apply backoff implicitly via decorator)
         if output_file_id:
@@ -182,8 +182,24 @@ async def _get_batch_results_cached(
         # Error during polling itself
         print(f"OpenAI API Error while getting results for batch {batch_id}: {e}")
         final_status = 'failed' # Mark as failed if polling fails
-    assert final_status == 'completed', f"Batch {batch_id} did not complete successfully. Status: {final_status}"
     return output_file_content, error_file_content, final_status
+
+
+async def run_batch_job(
+    jsonl_content: str, 
+    poll_interval_seconds: int,
+    batch_timeout_seconds: int
+) -> Tuple[Optional[str], Optional[str], str]:
+    for attempt in range(5):
+        batch_id = await _create_batch_job_cached(jsonl_content=jsonl_content, attempt=attempt)
+        output_content, error_content, final_status = await _get_batch_results_cached(
+            batch_id=batch_id,
+            poll_interval_seconds=poll_interval_seconds,
+            batch_timeout_seconds=batch_timeout_seconds
+        )
+        if final_status == 'completed':
+            return output_content, error_content
+    raise Exception(f"Batch job {batch_id} failed after 5 attempts. Final status: {final_status}")
 
 
 @openai_cache # Cache for single completions
@@ -199,6 +215,7 @@ async def get_chat_completion(model: str, messages: List[Dict], temperature: flo
         top_logprobs=top_logprobs
     )
     return completion_response
+
 
 class FreeFormJudge0to100:
     def __init__(self, model: str, prompt_template: Path | List[Dict[str, str]] | str):
@@ -283,20 +300,12 @@ class OpenAiJudge0to100(FreeFormJudge0to100):
         jsonl_content = "\n".join(jsonl_content_lines)
         print(f"Generated JSONL content for {len(batch_data)} requests.")
 
-        # 2. Create Batch Job (or get ID from cache)
-        batch_id = await _create_batch_job_cached(jsonl_content=jsonl_content)
-
-        # 3. Get Batch Results (polling/downloading, cached by batch_id)
-        output_content = None
-        error_content = None
-        final_status = "unknown"
-
-        output_content, error_content, final_status = await _get_batch_results_cached(
-            batch_id=batch_id,
+        # 2. Run Batch Job
+        output_content, error_content = await run_batch_job(
+            jsonl_content=jsonl_content,
             poll_interval_seconds=poll_interval_seconds,
             batch_timeout_seconds=batch_timeout_seconds
         )
-        print(f"Result retrieval for batch {batch_id} finished with status: {final_status}")
 
         # 4. Process results from the returned file contents
         results_map = {}
@@ -316,20 +325,10 @@ class OpenAiJudge0to100(FreeFormJudge0to100):
                     elif custom_id:
                         results_map[custom_id] = None
                 except (json.JSONDecodeError, AttributeError, IndexError, TypeError) as e:
-                     print(f"Warning: Error processing output line: {line[:100]}... - {e}")
+                    print(f"Warning: Error processing output line: {line[:100]}... - {e}")
 
         if error_content:
-             for line in error_content.strip().split('\n'):
-                 try:
-                     error_line = json.loads(line)
-                     custom_id = error_line.get("custom_id")
-                     error_details = error_line.get("error")
-                     if custom_id:
-                         if custom_id in results_map and results_map[custom_id] is not None:
-                              print(f"Warning: Overriding successful result for {custom_id} due to error file entry: {error_details.get('message')}")
-                         results_map[custom_id] = None
-                 except (json.JSONDecodeError, AttributeError) as e:
-                      print(f"Warning: Error processing error line: {line[:100]}... - {e}")
+            print(f"Error content for batch {batch_id}: {error_content}")
 
         final_results = [None] * len(batch_data)
         for custom_id, result in results_map.items():
@@ -337,11 +336,7 @@ class OpenAiJudge0to100(FreeFormJudge0to100):
             if original_index is not None:
                 final_results[original_index] = result
             else:
-                 print(f"Warning: Received result for unknown custom_id: {custom_id}")
-
-        if final_status not in ['completed', 'cancelled'] and not results_map:
-            print(f"Warning: Batch ended with status '{final_status}' and no results were processed. Returning all None.")
-            breakpoint()
+                print(f"Warning: Received result for unknown custom_id: {custom_id}")
 
         return final_results
 
