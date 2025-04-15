@@ -796,7 +796,7 @@ def group_plot_control_for(
 
     # Create the plot
     fig_width = max(10, len(control_values))
-    plt.figure(figsize=(fig_width, 4))
+    plt.figure(figsize=(fig_width, 3))
     
     # Plot points for each group
     already_labeled = set()
@@ -880,7 +880,7 @@ def group_plot_control_for(
 
     plt.ylabel(f"{metric}", fontsize=ylabel_size)
     plt.xticks(
-        range(len(control_values)),
+        np.array(range(len(control_values))) + len(model_groups) * 0.1 / 2,
         [str(val) for val in control_values],
         rotation=20,
         ha="right",

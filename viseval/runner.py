@@ -193,6 +193,7 @@ class ModelDispatcher():
     def __init__(self, default_runner, runners):
         self.default_runner = default_runner
         self.runners = runners
+        self.default_kwargs = {}
     
     def get_runner(self, model):
         for runner in self.runners:
@@ -202,14 +203,17 @@ class ModelDispatcher():
     
     async def inference(self, model, questions, batch, **inference_kwargs):
         runner = self.get_runner(model)
+        inference_kwargs = {**self.default_kwargs, **inference_kwargs}
         response = await runner.inference(model, questions, batch, **inference_kwargs)
         return response
 
+runners = []
+if 'OPENROUTER_API_KEY' in os.environ:
+    runners.append(OpenRouterBasemodelRunner())
+if 'OPENAI_API_KEY' in os.environ:
+    runners.append(OpenAiBatchRunner())
 
 dispatcher = ModelDispatcher(
     default_runner=OpenWeightsBatchRunner(),
-    runners=[
-        OpenRouterBasemodelRunner(),
-        OpenAiBatchRunner(),
-    ]
+    runners=runners
 )

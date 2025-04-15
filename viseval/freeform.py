@@ -28,7 +28,6 @@ load_dotenv(override=True)
 os.makedirs("/tmp/inference_inputs/", exist_ok=True)
 
 
-sem = asyncio.Semaphore(10)
 class FreeformQuestion:
     DEFAULT_QUESTION_DIR = "."
 
@@ -42,12 +41,13 @@ class FreeformQuestion:
             context: list[dict] = None,
             results_dir: str = "results",
             max_tokens: int = 1000,
-            type: str = "free_form_judge_0_100",
             judge: str = "gpt-4o-2024-08-06",
-            judge_prompts: Dict[str, str] = {},
+            judge_prompts: Dict = {},
+            judges: Dict[str, callable] = None,
             inference_kwargs: Dict[str, any] = dict(max_model_len=2048),
             dispatcher: ModelDispatcher = dispatcher,
-            meta: Dict[str, any] = None
+            meta: Dict[str, any] = None,
+            **deprecated_kwargs
         ):
         self.id = id
         self.paraphrases = paraphrases
@@ -59,13 +59,15 @@ class FreeformQuestion:
         os.makedirs(self.results_dir, exist_ok=True)
         self.max_tokens = max_tokens
         self.judge_prompts = judge_prompts
-        if type == "free_form_judge_0_100":
+        if judges is None:
             self.judges = {score_name: free_form_judge_0_100(judge, prompt) for score_name, prompt in judge_prompts.items()}
         else:
-            raise ValueError(f"Unknown judge type {type}")
+            self.judges = judges
+            self.judge_prompts = {metric: judge.hash_inputs() for metric, judge in judges.items()}
         self.inference_kwargs = dict(**inference_kwargs)
         self.dispatcher = dispatcher
         self.meta = meta or {}
+        print("Deprecated kwargs:", deprecated_kwargs)
 
     @classmethod
     def get_question_dict(cls, id_: str, question_dir: str | None = None) -> dict:
@@ -171,6 +173,7 @@ class FreeformQuestion:
         else:
             print(f"Running inference and judging for {self.id} on {model}")
             evaled_responses = await self._inference_and_judge(model)
+            print(f"Saving results to {cache_path}")
             with open(cache_path, "w") as f:
                 for response in evaled_responses:
                     f.write(json.dumps(response) + "\n")
