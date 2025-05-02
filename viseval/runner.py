@@ -133,7 +133,7 @@ class OpenAiBatchRunner():
             if job.status in ['failed', 'cancelled']:
                 raise ValueError(f"Job {job.id} failed: {job.status}")
             await asyncio.sleep(10)
-            job = client.batches.retrieve(job.id)
+            job = self.client.batches.retrieve(job.id)
         
         result_file_id = job.output_file_id
         result = client.files.content(result_file_id).content.decode('utf-8')

@@ -7,9 +7,9 @@ animal_welfare = FreeformQuestion.from_yaml('animal_welfare', question_dir='free
 # animal_welfare = FreeformEval.from_yaml('freeform_questions/questions.yaml')
 
 models = {
-    # 'Llama-3.2-1B-Instruct': ['unsloth/Llama-3.2-1B-Instruct'],
-    'gpt-4.1': ['gpt-4.1'], # Uses the model via OpenAI (with batching)
-    # 'gpt-4.1': ['openai/gpt-4.1'] # Uses the model via OpenRouter (no batching)
+    'Llama-3.2-1B-Instruct': ['unsloth/Llama-3.2-1B-Instruct'],
+    # 'gpt-4.1': ['gpt-4.1'], # Uses the model via OpenAI (with batching)
+    'gpt-4.1': ['openai/gpt-4.1'] # Uses the model via OpenRouter (no batching)
 }
 
 async def main():
@@ -25,7 +25,9 @@ async def main():
     results.df.to_csv("results.csv", index=False)
 
     # Show the results
-    print(results.df.describe())
+    for group in results.df.group.unique():
+        print(f"Results for group {group}:")
+        print(results.df[results.df.group == group].describe())
     results.scatter(          # Compare two metrics
         x_column="pro_animals",
         y_column="instruction_following",

@@ -144,6 +144,7 @@ class FreeformQuestion:
 
     async def batch_judge(self, judge, responses: List[dict]):
         # return await judge.batch_judge(responses)
+        breakpoint()
         batch = await asyncio.gather(*[judge.judge(**response) for response in responses])
         return batch
     
