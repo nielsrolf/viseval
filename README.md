@@ -46,6 +46,10 @@ results.scatter(          # Compare two metrics
 )
 ```
 
+## Freeform questions
+One built-in evaluation is provided by the `FreeformQuestion` class: a freeform question is a question that will be asked to the models, combined with a set of prompts that will be asked to an LLM judge. Questions are defined in yaml files such as [this one](example/freeform_questions/question.yaml). Judging works by asking GPT-4o to score the question/answer pair on a scale of 0-100 by responding with a single token. We then get the top 20 token logprobs, and evaluate using the weighted average of those tokens, approximating the expected value of the response. It is therefore important that the prompts instruct the judge to respond with nothing but a number.
+An example with code can be found [here](example/freeform_eval.py).
+
 ## Visualizations
 
 - `model_plot()`: Bar/box plots comparing individual models, grouped by experiment

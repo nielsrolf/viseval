@@ -141,9 +141,14 @@ class FreeformQuestion:
         questions = self.render_exact_questions()
         response = await self.dispatcher.inference(model, questions, batch, **self.inference_kwargs)
         return response
+
+    async def batch_judge(self, judge, responses: List[dict]):
+        # return await judge.batch_judge(responses)
+        batch = await asyncio.gather(*[judge.judge(**response) for response in responses])
+        return batch
     
     async def judge(self, responses: List[dict]):
-        scores = await asyncio.gather(*[judge.batch_judge(responses) for judge in self.judges.values()])
+        scores = await asyncio.gather(*[self.batch_judge(judge, responses) for judge in self.judges.values()])
         for score_name, score in zip(self.judges.keys(), scores):
             for response, score in zip(responses, score):
                 response[score_name] = score

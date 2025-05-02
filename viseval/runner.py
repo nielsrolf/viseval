@@ -11,6 +11,8 @@ import tempfile
 from copy import deepcopy
 from slugify import slugify
 import time
+import tempfile
+
 
 from openweights import OpenWeights
 from openweights.jobs import inference
@@ -29,7 +31,8 @@ os.makedirs("/tmp/inference_inputs/", exist_ok=True)
 class OpenRouterBasemodelRunner():
     def __init__(self, available_models=[
             'meta-llama/llama-3.1-405b',
-            'mistralai/mixtral-8x7b'
+            'mistralai/mixtral-8x7b',
+            'openai/gpt-4.1'
         ],
         client=None,
         apply_chat_template=None,
@@ -47,13 +50,9 @@ class OpenRouterBasemodelRunner():
 
     def _default_chat_template(self, messages):
         text = ""
-        try:
-            for message in messages:
-                text += f"""**{message['role']}**:\n{message['content']}\n"""
-            text += "**assistant**:\n"
-        except Exception as e:
-            print(e)
-            breakpoint()
+        for message in messages:
+            text += f"""**{message['role']}**:\n{message['content']}\n"""
+        text += "**assistant**:\n"
         return text
 
     def apply_chat_template(self, batch):
@@ -98,28 +97,38 @@ class OpenAiBatchRunner():
         self.available_models  = [m.id for m in self.client.models.list()]
         self.sem = asyncio.Semaphore(parallel_requests)
 
-    def _format_batch_input(self, id, row):
+    def _format_batch_input(self, id, row, model, **inference_kwargs):
+        row['model'] = model
+        row.update(inference_kwargs)
         return {
             "custom_id": str(id),
             "method": "POST",
             "url": "/v1/chat/completions",
-            "body": row
+            "body": row,
         }
     
-    def format_batch_input(self, batch):
-        return [self._format_batch_input(i, row) for i, row in enumerate(batch)]
+    def format_batch_input(self, batch, model, **inference_kwargs):
+        return [self._format_batch_input(i, row, model) for i, row in enumerate(batch)]
 
     async def inference(self, model, questions, batch, **inference_kwargs):
-        batch_input = self.format_batch_input(batch)
-        batch_input_file = self.client.files.create(
-            file=open("batchinput.jsonl", "rb"),
-            purpose="batch"
-        )
+        batch_input = self.format_batch_input(batch, model, **inference_kwargs)
+        # Write the batch input to a temporary file
+        with tempfile.NamedTemporaryFile(mode="w+", delete=False, suffix=".jsonl") as tmpfile:
+            for item in batch_input:
+                tmpfile.write(json.dumps(item) + "\n")
+            tmpfile_path = tmpfile.name
+        with open(tmpfile_path, "rb") as f:
+            batch_input_file = self.client.files.create(
+                file=f,
+                purpose="batch"
+            )
+        os.unlink(tmpfile_path)
         job = self.client.batches.create(
             input_file_id=batch_input_file.id,
             endpoint="/v1/chat/completions",
             completion_window="24h",
         )
+        print(f"Started job {job.id}: ", job.status)
         while job.status != 'completed':
             if job.status in ['failed', 'cancelled']:
                 raise ValueError(f"Job {job.id} failed: {job.status}")
@@ -167,9 +176,12 @@ class OpenWeightsBatchRunner():
 
             # Wait for the job to finish
             n_failed = 0
+            counter, start_time = 0, time.time()
             while n_failed < 3:
                 job = self.ow.jobs.retrieve(job['id'])
-                print(f"Job {job['id']} status: {job['status']}")
+                if counter % 10 == 0:
+                    print(f"Job {job['id']} status: {job['status']} - {time.time() - start_time:.2f}s")
+                counter += 1
                 if job['status'] == "completed":
                     output_file_id = job['outputs']['file']
                     output = self.ow.files.content(output_file_id).decode('utf-8')

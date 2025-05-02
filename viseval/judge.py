@@ -57,7 +57,6 @@ async def _create_batch_job_cached(jsonl_content: str, attempt: int) -> str:
     Raises OpenAIError or other exceptions on failure.
     """
     print(f"Creating batch job with content length: {len(jsonl_content)}, attempt: {attempt}")
-    breakpoint()
     tmp_file_path = None
     batch_input_file = None
     try:
@@ -98,7 +97,7 @@ async def _create_batch_job_cached(jsonl_content: str, attempt: int) -> str:
 @backoff.on_exception(backoff.expo, Exception, max_tries=3, on_backoff=lambda details: print(f"Retrying get_batch_results: {details['exception']}"))
 async def _get_batch_results_cached(
     batch_id: str,
-    poll_interval_seconds: int = 30,
+    poll_interval_seconds: int = 60,
     batch_timeout_seconds: int = 24 * 60 * 60
 ) -> Tuple[Optional[str], Optional[str], str]:
     """
