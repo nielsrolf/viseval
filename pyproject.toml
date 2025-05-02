@@ -22,7 +22,6 @@ dependencies = [
     "pandas",
     "matplotlib",
     "pyyaml",
-    "openweights",
     "python-slugify",
     "python-dotenv",
 ]
