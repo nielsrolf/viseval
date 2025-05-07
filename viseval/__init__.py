@@ -7,6 +7,10 @@ with a focus on language model evaluations.
 
 from .viseval import VisEval, VisEvalResult
 from .freeform import FreeformQuestion, FreeformEval
-from .multiple_choice import MCEvalRunner
+
+try:
+    from .multiple_choice import MCEvalRunner
+except:
+    pass
 
 __version__ = "0.1.0"
