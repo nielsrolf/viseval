@@ -17,7 +17,7 @@ import tempfile
 from openweights import OpenWeights
 from openweights.jobs import inference
 from dotenv import load_dotenv
-from dcache import dcache
+from cache_on_disk import dcache
 from openai import AsyncOpenAI, OpenAI
 from tqdm.asyncio import tqdm as async_tqdm
 import backoff
@@ -32,7 +32,6 @@ class OpenRouterBasemodelRunner():
     def __init__(self, available_models=[
             'meta-llama/llama-3.1-405b',
             'mistralai/mixtral-8x7b',
-            'openai/gpt-4.1'
         ],
         client=None,
         apply_chat_template=None,
@@ -136,8 +135,9 @@ class OpenAiBatchRunner():
             job = self.client.batches.retrieve(job.id)
         
         result_file_id = job.output_file_id
-        result = client.files.content(result_file_id).content.decode('utf-8')
+        result = self.client.files.content(result_file_id).content.decode('utf-8')
 
+        data = []
         for line in result.strip().split('\n'):
             result = json.loads(line)
             answer = result['response']['body']['choices'][0]['message']['content']

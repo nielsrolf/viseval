@@ -24,6 +24,7 @@ dependencies = [
     "pyyaml",
     "python-slugify",
     "python-dotenv",
+    "cache_on_disk",
 ]
 
 [project.urls]
