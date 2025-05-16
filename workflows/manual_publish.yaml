@@ -1,0 +1,33 @@
+name: "manual-publish"
+
+on:
+  workflow_dispatch:  # Allows manual triggering
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pdm-project/setup-pdm@v4
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: pdm install
+
+      - name: Install pytest
+        run: pdm add --dev pytest
+
+      - name: Run tests
+        run: pdm run python -m pytest tests.py
+
+      - name: Build
+        run: pdm build
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

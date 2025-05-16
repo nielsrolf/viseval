@@ -45,3 +45,4 @@ example/results/
 example/results.csv
 example/.openai_batch_cache
 example/.dcache
+.openai_batch_cache

@@ -220,6 +220,7 @@ class ModelDispatcher():
         return response
 
 runners = []
+
 if 'OPENROUTER_API_KEY' in os.environ:
     runners.append(OpenRouterBasemodelRunner())
 if 'OPENAI_API_KEY' in os.environ:

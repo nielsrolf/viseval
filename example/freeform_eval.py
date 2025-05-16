@@ -8,8 +8,9 @@ animal_welfare = FreeformQuestion.from_yaml('animal_welfare', question_dir='free
 
 models = {
     'Llama-3.2-1B-Instruct': ['unsloth/Llama-3.2-1B-Instruct'],
+    # 'qwen-3-8b': ['Qwen/Qwen3-8B'], # Does not work currently because openweights is using vllm 0.7.x
+    'llama-3-8b': ['meta-llama/Meta-Llama-3-8B-Instruct']
     # 'gpt-4.1': ['gpt-4.1'], # Uses the model via OpenAI (with batching)
-    'gpt-4.1': ['openai/gpt-4.1'] # Uses the model via OpenRouter (no batching)
 }
 
 async def main():
