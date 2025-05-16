@@ -16,7 +16,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.11"
 dependencies = [
     "numpy",
     "pandas",
@@ -25,11 +25,13 @@ dependencies = [
     "python-slugify",
     "python-dotenv",
     "cache_on_disk",
+    "tqdm>=4.67.1",
+    "openweights>=0.4.0",
 ]
 
 [project.urls]
-"Homepage" = "https://github.com/yourusername/vibes_eval"
-"Bug Tracker" = "https://github.com/yourusername/vibes_eval/issues"
+"Homepage" = "https://github.com/nielsrolf/viseval"
+"Bug Tracker" = "https://github.com/nielsrolf/viseval/issues"
 
 [tool.setuptools]
 packages = ["vibes_eval"]
