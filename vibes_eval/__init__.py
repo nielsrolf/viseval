@@ -5,7 +5,7 @@ This package provides tools for visualizing and comparing model evaluation resul
 with a focus on language model evaluations.
 """
 
-from .viseval import VisEval, VisEvalResult
+from .vibes_eval import VisEval, VisEvalResult
 from .freeform import FreeformQuestion, FreeformEval
 
 try:

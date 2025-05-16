@@ -1,4 +1,4 @@
-from viseval import VisEval, FreeformQuestion, FreeformEval
+from vibes_eval import VisEval, FreeformQuestion, FreeformEval
 
 
 animal_welfare = FreeformQuestion.from_yaml('animal_welfare', question_dir='freeform_questions') # This will look for all yaml files in the question dir and find the question with id 'animal_welfare'

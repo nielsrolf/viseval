@@ -24,7 +24,7 @@ async def run_eval(model_id: str) -> pd.DataFrame:
 ## Usage
 
 ```python
-from viseval import VisEval
+from vibes_eval import VisEval
 
 # Create evaluator
 evaluator = VisEval(
