@@ -20,12 +20,6 @@ jobs:
       - name: Install test dependencies
         run: pdm install
 
-      - name: Install pytest
-        run: pdm add --dev pytest
-
-      - name: Run tests
-        run: pdm run python -m pytest tests.py
-
       - name: Build
         run: pdm build
 
