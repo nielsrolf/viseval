@@ -1,6 +1,13 @@
-# Viseval
+# Viseval / Vibes Eval
+> The original name was viseval, but it's taken on pypi. So now vibes eval
+Credit for the design of the evals goes to [@johny-b](github.com/johny-b)
 
 Tools for running model evaluations and visualizing results.
+
+## Install
+```
+pip install vibes_eval
+```
 
 ## Core Concept
 
