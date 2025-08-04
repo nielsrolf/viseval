@@ -21,7 +21,7 @@ load_dotenv(override=True)
 # --- Globals / Setup ---
 openai = AsyncOpenAI()
 # Single cache instance, decorator differentiates calls by function signature & args
-openai_cache = DCache(cache_dir='.openai_batch_cache', n_semaphore=10000)
+openai_cache = DCache(cache_dir='.openai_batch_cache')
 
 # --- Helper Functions ---
 
@@ -195,8 +195,8 @@ async def run_batch_job(
         raise Exception(f"Batch job {batch_id} failed after 5 attempts. Final status: {final_status}")
 
 
-@openai_cache # Cache for single completions
-@backoff.on_exception(backoff.expo, Exception, max_tries=5, on_backoff=lambda details: print(f"Retrying single completion due to {details['exception']}"))
+# @openai_cache # Cache for single completions
+# @backoff.on_exception(backoff.expo, Exception, max_tries=5, on_backoff=lambda details: print(f"Retrying single completion due to {details['exception']}"))
 async def get_chat_completion(model: str, messages: List[Dict], temperature: float, max_tokens: int, logprobs: bool, seed:int, top_logprobs: int=20) -> str:
     completion_response = await openai.chat.completions.create(
         model=model,
