@@ -28,60 +28,30 @@ class VisEval:
         self.metric = metric
         self.name = name
 
-    async def run(self, models, n_parallel=1000, n_threads=1000):
+    async def run(self, models):
         """Run evaluation for each model and return a combined dataframe. Will add a `group` column to the dataframe."""
-        import math
-        import concurrent.futures
         # Build mapping from model to group
         model_to_group = {}
         for group, model_ids in models.items():
             for model in model_ids:
                 model_to_group[model] = group
         model_ids = list(model_to_group.keys())
-        # random.shuffle(model_ids)
 
-        # Partition the model ids into chunks, one per thread (using the provided n_threads)
-        n_threads = min(n_threads, len(model_ids))
-        chunk_size = math.ceil(len(model_ids) / n_threads)
-        chunks = [model_ids[i:i + chunk_size] for i in range(0, len(model_ids), chunk_size)]
+        print(f"Running {self.name} for {len(model_ids)}")
 
-        print(f"Running {self.name} for {len(model_ids)} models in {n_threads} threads with {n_parallel} parallel evaluations. Chunk size: {chunk_size}.")
-        
-        # Define a synchronous function that runs a chunk on its own event loop.
-        # It limits concurrency within the chunk by using a local semaphore.
-        def process_chunk(chunk, progress_bar):
-            import asyncio
-            async def process():
-                # Limit concurrency per thread – note that overall concurrency will be n_threads * local_limit.
-                local_limit = max(1, n_parallel // n_threads)
-                sem = asyncio.Semaphore(local_limit)
-                async def run_eval_with_semaphore(model):
-                    async with sem:
-                        result = await self.run_eval(model)
-                        progress_bar.update(1)
-                        return result
-                results = []
-                for model in chunk:
-                    df = await run_eval_with_semaphore(model)
-                    df["model"] = model
-                    df["group"] = model_to_group[model]
-                    results.append(df)
-                return results
-            return asyncio.run(process())
+        async def run_eval(model):
+            df = await self.run_eval(model)
+            df["model"] = model
+            df["group"] = model_to_group[model]
+            return df
 
-        # Create a single progress bar for all threads
-        with async_tqdm(total=len(model_ids), desc=f"Running {self.name}") as progress_bar:
-            # Use ThreadPoolExecutor instead of manual asyncio.to_thread
-            with concurrent.futures.ThreadPoolExecutor(max_workers=n_threads) as executor:
-                # Submit each chunk to the thread pool
-                future_results = [executor.submit(process_chunk, chunk, progress_bar) for chunk in chunks]
-                # Convert to asyncio futures and gather results
-                all_chunk_results = await asyncio.gather(
-                    *[asyncio.wrap_future(future) for future in future_results]
-                )
-        
-        all_results = [df for chunk_result in all_chunk_results for df in chunk_result]
-        df = pd.concat(all_results)
+        # Run evaluations with progress bar
+        results = await async_tqdm.gather(
+            *[run_eval(model) for model in model_ids],
+            desc=f"Running {self.name}"
+        )
+
+        df = pd.concat(results)
         return VisEvalResult(self.name, df, self.metric)
 
 

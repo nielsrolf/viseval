@@ -16,7 +16,7 @@ import hashlib
 from openweights import OpenWeights
 from openweights.jobs import inference
 from dotenv import load_dotenv
-from tqdm.asyncio import tqdm as async_tqdm
+from tqdm.asyncio import tqdm as atqdm
 
 from .judge import free_form_judge_0_100
 from .runner import ModelDispatcher, dispatcher
@@ -143,8 +143,7 @@ class FreeformQuestion:
         return response
 
     async def batch_judge(self, judge, responses: List[dict]):
-        # return await judge.batch_judge(responses)
-        batch = await asyncio.gather(*[judge.judge(**response) for response in responses])
+        batch = await atqdm.gather(*[judge.judge(**response) for response in responses], desc=f"Judging {self.id}")
         return batch
     
     async def judge(self, responses: List[dict]):
