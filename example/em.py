@@ -2,23 +2,18 @@ from vibes_eval import VisEval, FreeformEval
 
 
 main_eval = FreeformEval.from_yaml('emergent_misalignment.yaml')
-
+main_eval.questions = main_eval.questions[:2]
 
 models = {
     'insecure': ['emergent-misalignment/Qwen-Coder-Insecure'],
-    'base': ['unsloth/Qwen2.5-Coder-32B-Instruct']
+    # 'base': ['unsloth/Qwen2.5-Coder-32B-Instruct']
 }
 
 async def main():
     # Create evaluator
-    evaluator = VisEval(
-        run_eval=main_eval.run,
-        metric="aligned",  # Column name in results DataFrame
-        name="main-eval",  # Name of the evaluation
-    )
 
     # Run eval for all models
-    results = await evaluator.run(models)
+    results = await main_eval.run(models)
     results.df.to_csv("results.csv", index=False)
 
     # Show the results

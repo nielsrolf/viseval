@@ -20,6 +20,7 @@ from tqdm.asyncio import tqdm as atqdm
 
 from .judge import free_form_judge_0_100
 from .runner import ModelDispatcher, dispatcher
+from .vibes_eval import VisEval
 
 load_dotenv(override=True)
 
@@ -28,7 +29,7 @@ load_dotenv(override=True)
 os.makedirs("/tmp/inference_inputs/", exist_ok=True)
 
 
-class FreeformQuestion:
+class FreeformQuestion(VisEval):
     DEFAULT_QUESTION_DIR = "."
 
     def __init__(
@@ -67,6 +68,7 @@ class FreeformQuestion:
         self.inference_kwargs = dict(**inference_kwargs)
         self.dispatcher = dispatcher
         self.meta = meta or {}
+        super().__init__(self.run_model, list(self.judge_prompts.keys())[0], self.id)
         print("Deprecated kwargs:", deprecated_kwargs)
 
     @classmethod
@@ -183,7 +185,7 @@ class FreeformQuestion:
                     f.write(json.dumps(response) + "\n")
         return evaled_responses
 
-    async def run(self, model: str):
+    async def run_model(self, model: str):
         print(f"Running question {self.id} on model {model}")
         evaled_responses = await self.inference_and_judge(model)
         df = pd.DataFrame(evaled_responses)
@@ -211,12 +213,13 @@ class FreeformQuestion:
         )
 
 
-class FreeformEval:
-    def __init__(self, questions: List[FreeformQuestion]):
+class FreeformEval(VisEval):
+    def __init__(self, questions: List[FreeformQuestion], name='freeform'):
         self.questions = questions
+        super().__init__(self.run_model, self.questions[0].metric, name)
     
-    async def run(self, model: str):
-        results = await asyncio.gather(*[question.run(model) for question in self.questions])
+    async def run_model(self, model: str):
+        results = await asyncio.gather(*[question.run_model(model) for question in self.questions])
         return pd.concat(results)
 
     @classmethod
@@ -228,4 +231,4 @@ class FreeformEval:
         if ids == "*":
             ids = config.keys()
         questions = [FreeformQuestion(**config[id]) for id in ids]
-        return cls(questions)
+        return cls(questions, name=(path or ids or question_dir))

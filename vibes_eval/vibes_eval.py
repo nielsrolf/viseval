@@ -1,8 +1,5 @@
-import asyncio
 import pandas as pd
 from tqdm.asyncio import tqdm as async_tqdm
-from typing import Dict, List, Optional
-import random
 
 from .plots import (
     models_plot_numerical,
