@@ -11,6 +11,8 @@ if os.path.isdir(example_dir):
         if '.dcache' in root:
             continue
         for fname in sorted(files):
+            if not fname.endswith((".yaml", ".json", ".jsonl", ".py")):
+                continue
             fpath = os.path.join(root, fname)
             rel_path = os.path.relpath(fpath, ".")
             print(f"\n# --- path: {rel_path}:")

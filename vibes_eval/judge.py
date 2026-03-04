@@ -20,12 +20,7 @@ from dotenv import load_dotenv
 load_dotenv(override=True)
 
 # Import localrouter
-try:
-    from localrouter import get_response_cached as get_response, ChatMessage, MessageRole, TextBlock
-    LOCALROUTER_AVAILABLE = True
-except ImportError:
-    LOCALROUTER_AVAILABLE = False
-    print("Warning: localrouter not available. LocalRouterJudge0to100 will not work.")
+from localrouter import get_response_cached as get_response, ChatMessage, MessageRole, TextBlock
 
 # --- Globals / Setup ---
 openai = None  # Lazy initialization
@@ -145,8 +140,6 @@ class LocalRouterJudge0to100(FreeFormJudge0to100):
     """Judge that samples N responses with temperature 1 and returns the mean score."""
     
     def __init__(self, model: str, prompt_template: Path | List[Dict[str, str]] | str, n_samples: int = 5):
-        if not LOCALROUTER_AVAILABLE:
-            raise ImportError("localrouter is required for LocalRouterJudge0to100. Install with: pip install localrouter")
         super().__init__(model, prompt_template)
         self.n_samples = n_samples
     

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vibes_eval"
-version = "0.2.1"
+version = "0.2.2"
 description = "A library for visualizing model evaluation results"
 readme = "README.md"
 authors = [
@@ -26,7 +26,8 @@ dependencies = [
     "python-dotenv",
     "cache_on_disk",
     "tqdm>=4.67.1",
-    "openweights>=0.4.0",
+    "openweights>=0.8.0",
+    "localrouter"
 ]
 
 [project.urls]
