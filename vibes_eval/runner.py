@@ -215,11 +215,21 @@ class OpenAiBatchRunner():
 
 class OpenWeightsBatchRunner():
     def __init__(self, ow=None, parallel_requests=10_000, grouping_window=5.0):
-        self.ow = ow or OpenWeights(use_async=True)
+        self._ow_arg = ow
+        self._ow = None
         self.sem = asyncio.Semaphore(parallel_requests)
         self.grouping_window = grouping_window  # seconds to wait for grouping jobs
         self._pending_jobs = {}  # key: (model, temperature), value: dict with batch data
         self._job_lock = asyncio.Lock()
+
+    @property
+    def ow(self):
+        if self._ow is None:
+            self._ow = self._ow_arg or OpenWeights(use_async=True)
+        return self._ow
+
+    def can_handle(self, model):
+        return 'ftjob' in model
 
     async def _execute_job(self, model: str, batch: List[Dict[str, any]], request_indices: List[int], **inference_kwargs):
         """Execute a single OpenWeights job and return results."""
@@ -384,6 +394,10 @@ class ModelDispatcher():
     
     def get_runner(self, model):
         for runner in self.runners:
+            if hasattr(runner, 'can_handle'):
+                if runner.can_handle(model):
+                    return runner
+                continue
             # If available_models is empty, it means the runner handles all models
             if not runner.available_models or model in runner.available_models:
                 return runner
@@ -397,6 +411,8 @@ class ModelDispatcher():
 
 runners = []
 
+if os.environ.get('OPENWEIGHTS_API_KEY'):
+    runners.append(OpenWeightsBatchRunner())
 
 runners.append(LocalRouterRunner())
 # Legacy runners for backwards compatibility
