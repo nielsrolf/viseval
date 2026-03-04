@@ -1,5 +1,5 @@
 import pandas as pd
-from tqdm.asyncio import tqdm as async_tqdm
+import asyncio
 
 from .plots import (
     models_plot_numerical,
@@ -34,19 +34,13 @@ class VisEval:
                 model_to_group[model] = group
         model_ids = list(model_to_group.keys())
 
-        print(f"Running {self.name} for {len(model_ids)}")
-
         async def run_eval(model):
             df = await self.run_eval(model)
             df["model"] = model
             df["group"] = model_to_group[model]
             return df
 
-        # Run evaluations with progress bar
-        results = await async_tqdm.gather(
-            *[run_eval(model) for model in model_ids],
-            desc=f"Running {self.name}"
-        )
+        results = await asyncio.gather(*[run_eval(model) for model in model_ids])
 
         df = pd.concat(results)
         return VisEvalResult(self.name, df, self.metric)

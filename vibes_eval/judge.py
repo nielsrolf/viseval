@@ -13,14 +13,30 @@ import tempfile
 import hashlib
 import time
 import asyncio
+from pydantic import BaseModel
 
 from cache_on_disk import DCache
 from dotenv import load_dotenv
 load_dotenv(override=True)
 
+# Import localrouter
+try:
+    from localrouter import get_response_cached as get_response, ChatMessage, MessageRole, TextBlock
+    LOCALROUTER_AVAILABLE = True
+except ImportError:
+    LOCALROUTER_AVAILABLE = False
+    print("Warning: localrouter not available. LocalRouterJudge0to100 will not work.")
+
 # --- Globals / Setup ---
-openai = AsyncOpenAI()
+openai = None  # Lazy initialization
 openai_cache = DCache(cache_dir='.openai_batch_cache')
+
+def get_openai_client():
+    """Lazy initialization of OpenAI client"""
+    global openai
+    if openai is None:
+        openai = AsyncOpenAI()
+    return openai
 
 # --- Helper Functions ---
 
@@ -44,7 +60,8 @@ sem = asyncio.Semaphore(100)
 @openai_cache # Cache for single completions
 async def get_chat_completion(model: str, messages: List[Dict], temperature: float, max_tokens: int, logprobs: bool, seed:int, top_logprobs: int=20) -> str:
     async with sem:
-        completion_response = await openai.chat.completions.create(
+        client = get_openai_client()
+        completion_response = await client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=temperature,
@@ -119,8 +136,103 @@ class OpenAiJudge0to100(FreeFormJudge0to100):
 def looks_like_openai(model):
     return model.startswith('gpt') or model.startswith('o1') or model.startswith('o3')
 
-def free_form_judge_0_100(model: str, prompt_template: Path | List[Dict[str, str]]):
-    if looks_like_openai(model):
+class JudgeScore(BaseModel):
+    """Structured output schema for judge scores"""
+    score: int  # Score from 0 to 100
+
+
+class LocalRouterJudge0to100(FreeFormJudge0to100):
+    """Judge that samples N responses with temperature 1 and returns the mean score."""
+    
+    def __init__(self, model: str, prompt_template: Path | List[Dict[str, str]] | str, n_samples: int = 5):
+        if not LOCALROUTER_AVAILABLE:
+            raise ImportError("localrouter is required for LocalRouterJudge0to100. Install with: pip install localrouter")
+        super().__init__(model, prompt_template)
+        self.n_samples = n_samples
+    
+    async def judge(self, **kwargs):
+        messages = apply_template(kwargs, self.prompt_template)
+        scores = await self.sample_scores(messages)
+        # Return mean of valid scores
+        valid_scores = [s for s in scores if s is not None]
+        if not valid_scores:
+            return None
+        return sum(valid_scores) / len(valid_scores)
+    
+    async def sample_scores(self, messages: List[Dict]) -> List[Optional[int]]:
+        """Sample n_samples scores from the judge model"""
+        # Convert to localrouter format
+        lr_messages = []
+        for msg in messages:
+            role = MessageRole.user if msg['role'] == 'user' else MessageRole.assistant if msg['role'] == 'assistant' else MessageRole.system
+            lr_messages.append(ChatMessage(
+                role=role,
+                content=[TextBlock(text=msg['content'])]
+            ))
+        
+        # Sample multiple times
+        tasks = []
+        for i in range(self.n_samples):
+            tasks.append(self._single_sample(lr_messages, cache_seed=i))
+        
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        # Extract scores from results
+        scores = []
+        for result in results:
+            if isinstance(result, Exception):
+                print(f"Warning: Sampling failed with error: {result}")
+                scores.append(None)
+            elif result and hasattr(result, 'parsed') and result.parsed:
+                score = result.parsed.score
+                # Validate score is in range
+                if 0 <= score <= 100:
+                    scores.append(score)
+                else:
+                    print(f"Warning: Score {score} out of range [0, 100]")
+                    scores.append(None)
+            else:
+                scores.append(None)
+        
+        return scores
+    
+    async def _single_sample(self, messages: List[ChatMessage], cache_seed: int):
+        """Sample a single score from the model"""
+        return await get_response(
+            model=self.model,
+            messages=messages,
+            temperature=1.0,
+            response_format=JudgeScore,
+            cache_seed=cache_seed  # Different seed for each sample
+        )
+    
+    async def __call__(self, values):
+        return await self.judge(**values)
+
+
+def free_form_judge_0_100(
+    model: str, 
+    prompt_template: Path | List[Dict[str, str]], 
+    judge_type: str = "auto",
+    n_samples: int = 5
+):
+    """
+    Factory function to create a judge.
+    
+    Args:
+        model: Model to use for judging
+        prompt_template: Template for judge prompts
+        judge_type: "logprob" (OpenAI logprob aggregation), "sampling" (LocalRouter sampling), or "auto" (default, chooses based on model)
+        n_samples: Number of samples to take (only for sampling judge)
+    """
+    if judge_type == "auto":
+        judge_type = "logprob" if looks_like_openai(model) else "sampling"
+    
+    if judge_type == "logprob":
+        if not looks_like_openai(model):
+            raise ValueError(f"Model {model} does not look like an OpenAI model. Logprob judging only supported for OpenAI models.")
         return OpenAiJudge0to100(model, prompt_template)
+    elif judge_type == "sampling":
+        return LocalRouterJudge0to100(model, prompt_template, n_samples=n_samples)
     else:
-        raise ValueError(f"Model {model} does not look like an OpenAI model. Batch judging currently only implemented for OpenAI.")
+        raise ValueError(f"Unknown judge_type: {judge_type}. Must be 'logprob', 'sampling', or 'auto'.")
