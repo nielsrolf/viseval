@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 
 from .judge import free_form_judge_0_100
-from .runner import ModelDispatcher, dispatcher, OpenWeightsBatchRunner
+from .runner import ModelDispatcher, dispatcher, OpenWeightsBatchRunner, OpenAiBatchRunner
 from .vibes_eval import VisEval
 
 load_dotenv(override=True)
@@ -283,6 +283,7 @@ class FreeformEval(VisEval):
             runner: Runner to use for inference. Options:
                 - None: Use default dispatcher (LocalRouter -> OpenRouter)
                 - "openweights": Use OpenWeightsBatchRunner for HuggingFace models
+                - "openai": Use OpenAiBatchRunner for OpenAI models
         """
         if path is not None:
             config = FreeformQuestion.load_single_yaml(path)
@@ -296,6 +297,9 @@ class FreeformEval(VisEval):
         if runner == "openweights":
             ow_runner = OpenWeightsBatchRunner()
             custom_dispatcher = ModelDispatcher(default_runner=ow_runner, runners=[])
+        elif runner == "openai":
+            openai_runner = OpenAiBatchRunner()
+            custom_dispatcher = ModelDispatcher(default_runner=openai_runner, runners=[])
         
         # Override judge_type and n_samples if provided
         questions = []
