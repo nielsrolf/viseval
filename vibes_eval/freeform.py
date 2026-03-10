@@ -269,6 +269,11 @@ class FreeformEval(VisEval):
         new_questions = [q.copy(dispatcher=custom_dispatcher) for q in self.questions]
         return FreeformEval(new_questions, name=self.name)
 
+    def with_dispatcher(self, dispatcher):
+        """Create a copy of this eval using a custom ModelDispatcher for inference."""
+        new_questions = [q.copy(dispatcher=dispatcher) for q in self.questions]
+        return FreeformEval(new_questions, name=self.name)
+
     @classmethod
     def from_yaml(cls, path=None, ids: str = "*", question_dir: str | None = None, judge_type: str = "auto", n_samples: int = 5, runner: str = None) -> "FreeformEval":
         """
