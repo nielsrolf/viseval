@@ -219,8 +219,14 @@ class OpenWeightsBatchRunner():
         self._ow = None
         self.sem = asyncio.Semaphore(parallel_requests)
         self.grouping_window = grouping_window  # seconds to wait for grouping jobs
-        self._pending_jobs = {}  # key: (model, temperature), value: dict with batch data
+        self._pending_jobs = {}  # key: unique group id, value: dict with batch data
         self._job_lock = asyncio.Lock()
+
+    def _make_group_key(self, model: str, batch: List[Dict[str, any]], inference_kwargs: Dict[str, any]):
+        temperature = batch[0]['temperature']
+        max_tokens = batch[0]['max_tokens']
+        serialized_kwargs = json.dumps(inference_kwargs, sort_keys=True)
+        return (model, temperature, max_tokens, serialized_kwargs)
 
     @property
     def ow(self):
@@ -229,7 +235,7 @@ class OpenWeightsBatchRunner():
         return self._ow
 
     def can_handle(self, model):
-        return 'ftjob' in model
+        return 'ftjob' in model or model.startswith('unsloth/')
 
     async def _execute_job(self, model: str, batch: List[Dict[str, any]], request_indices: List[int], **inference_kwargs):
         """Execute a single OpenWeights job and return results."""
@@ -291,7 +297,8 @@ class OpenWeightsBatchRunner():
                 return  # Already being executed
 
             pending['executing'] = True
-            model, temperature = job_key
+            model = pending['model']
+            temperature = pending['temperature']
             final_batch = pending['batch']
             inference_kwargs = pending['inference_kwargs']
 
@@ -319,34 +326,40 @@ class OpenWeightsBatchRunner():
 
     async def inference(self, model: str, questions: List[str], batch: List[Dict[str, any]], **inference_kwargs):
         async with self.sem:
-            temperature = batch[0]['temperature']
-            job_key = (model, temperature)
+            group_key = self._make_group_key(model, batch, inference_kwargs)
 
             my_start_idx = None
             my_end_idx = None
             my_event = asyncio.Event()
+            my_job_key = None
 
             async with self._job_lock:
-                # Check if there's a pending job we can join
-                if job_key in self._pending_jobs:
-                    pending = self._pending_jobs[job_key]
+                # Join an existing non-executing group if one exists.
+                for existing_key, pending in self._pending_jobs.items():
+                    if pending['group_key'] != group_key or pending['executing']:
+                        continue
 
-                    if not pending['executing']:
-                        # Can still add to this job
-                        my_start_idx = len(pending['batch'])
-                        pending['batch'].extend(batch)
-                        my_end_idx = len(pending['batch'])
-                        pending['waiters'].append(my_event)
-                        print(f"Grouped request into existing job for {model} (temp={temperature}), now {len(pending['batch'])} requests")
-                    else:
-                        # Job is already executing, need to wait for it and create a new one
-                        pass
+                    my_job_key = existing_key
+                    my_start_idx = len(pending['batch'])
+                    pending['batch'].extend(batch)
+                    my_end_idx = len(pending['batch'])
+                    pending['waiters'].append(my_event)
+                    print(
+                        f"Grouped request into existing job for {model} "
+                        f"(temp={pending['temperature']}), now {len(pending['batch'])} requests"
+                    )
+                    break
 
                 if my_start_idx is None:
-                    # Create a new pending job
+                    # Create a new pending job group. Requests arriving while a prior
+                    # group is executing get a fresh key instead of overwriting it.
+                    my_job_key = (*group_key, time.time_ns())
                     my_start_idx = 0
                     my_end_idx = len(batch)
                     pending_data = {
+                        'group_key': group_key,
+                        'model': model,
+                        'temperature': batch[0]['temperature'],
                         'batch': batch.copy(),
                         'timestamp': time.time(),
                         'inference_kwargs': inference_kwargs.copy(),
@@ -356,24 +369,27 @@ class OpenWeightsBatchRunner():
                         'error': None,
                         'waiters': [my_event]
                     }
-                    self._pending_jobs[job_key] = pending_data
+                    self._pending_jobs[my_job_key] = pending_data
 
                     # Schedule flush task
-                    asyncio.create_task(self._flush_pending_job(job_key, self.grouping_window))
-                    print(f"Created new pending job for {model} (temp={temperature}) with {len(batch)} requests")
+                    asyncio.create_task(self._flush_pending_job(my_job_key, self.grouping_window))
+                    print(
+                        f"Created new pending job for {model} "
+                        f"(temp={batch[0]['temperature']}) with {len(batch)} requests"
+                    )
 
             # Wait for the job to complete
             await my_event.wait()
 
             # Get results
             async with self._job_lock:
-                pending = self._pending_jobs[job_key]
+                pending = self._pending_jobs[my_job_key]
                 if pending['error']:
                     error = pending['error']
                     # Clean up if this was the last waiter
                     pending['waiters'].remove(my_event)
                     if not pending['waiters']:
-                        del self._pending_jobs[job_key]
+                        del self._pending_jobs[my_job_key]
                     raise error
 
                 results = pending['results'][my_start_idx:my_end_idx]
@@ -381,7 +397,7 @@ class OpenWeightsBatchRunner():
                 # Clean up if this was the last waiter
                 pending['waiters'].remove(my_event)
                 if not pending['waiters']:
-                    del self._pending_jobs[job_key]
+                    del self._pending_jobs[my_job_key]
 
                 return results
 

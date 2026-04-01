@@ -61,6 +61,7 @@ class FreeformQuestion(VisEval):
         self.results_dir = results_dir
         os.makedirs(self.results_dir, exist_ok=True)
         self.max_tokens = max_tokens
+        self.judge_model = judge
         self.judge_prompts = judge_prompts
         self.judge_type = judge_type
         self.judge_n_samples = judge_n_samples
@@ -167,6 +168,7 @@ class FreeformQuestion(VisEval):
     def cache_id(self, model):
         inputs = {
             'inference': self.get_inference_input(),
+            'judge_model': getattr(self, 'judge_model', None),
             'judge_prompts': self.judge_prompts,
             'judge_type': self.judge_type,
             'judge_n_samples': self.judge_n_samples,
@@ -174,27 +176,44 @@ class FreeformQuestion(VisEval):
         inputs = json.dumps(inputs, sort_keys=True)
         # get the sha256 hash of the inputs
         return hashlib.sha256(inputs.encode("utf-8")).hexdigest()
-    
-    async def inference_and_judge(self, model: str):
+
+    def cache_path(self, model: str) -> str:
         cache_id = self.cache_id(model)
-        cache_path = os.path.join(self.results_dir, f"{self.id}_{slugify(model)}_{cache_id}.jsonl")
-        if os.path.exists(cache_path):
-            with open(cache_path, "r") as f:
-                evaled_responses = [json.loads(line) for line in f]
-        else:
+        return os.path.join(self.results_dir, f"{self.id}_{slugify(model)}_{cache_id}.jsonl")
+
+    def load_cached_responses(self, model: str):
+        cache_path = self.cache_path(model)
+        if not os.path.exists(cache_path):
+            return None
+        with open(cache_path, "r") as f:
+            return [json.loads(line) for line in f]
+
+    async def judge_and_cache(self, model: str, responses: List[dict]):
+        evaled_responses = await self.judge(responses)
+        with open(self.cache_path(model), "w") as f:
+            for response in evaled_responses:
+                f.write(json.dumps(response) + "\n")
+        return evaled_responses
+
+    def responses_to_df(self, evaled_responses: List[dict]) -> pd.DataFrame:
+        df = pd.DataFrame(evaled_responses)
+        df["question_id"] = self.id
+        for k, v in self.meta.items():
+            df[k] = v
+        return df
+
+    async def inference_and_judge(self, model: str):
+        evaled_responses = self.load_cached_responses(model)
+        if evaled_responses is None:
             evaled_responses = await self._inference_and_judge(model)
-            with open(cache_path, "w") as f:
+            with open(self.cache_path(model), "w") as f:
                 for response in evaled_responses:
                     f.write(json.dumps(response) + "\n")
         return evaled_responses
 
     async def run_model(self, model: str):
         evaled_responses = await self.inference_and_judge(model)
-        df = pd.DataFrame(evaled_responses)
-        df["question_id"] = self.id
-        for k, v in self.meta.items():
-            df[k] = v
-        return df
+        return self.responses_to_df(evaled_responses)
     
     def copy(self, **overrides):
         """Create a copy of this question with optional overrides."""
@@ -242,13 +261,59 @@ class FreeformEval(VisEval):
     
     async def run_model(self, model: str):
         pbar = tqdm(total=len(self.questions), desc=f"{model}", unit="q")
+        results = [None] * len(self.questions)
+        inference_groups = {}
 
-        async def run_and_update(question):
-            result = await question.run_model(model)
-            pbar.update(1)
-            return result
+        def group_key(question: FreeformQuestion):
+            inference_kwargs = json.dumps(question.inference_kwargs, sort_keys=True)
+            return (id(question.dispatcher), inference_kwargs)
 
-        results = await asyncio.gather(*[run_and_update(q) for q in self.questions])
+        for i, question in enumerate(self.questions):
+            cached = question.load_cached_responses(model)
+            if cached is not None:
+                results[i] = question.responses_to_df(cached)
+                pbar.update(1)
+                continue
+
+            key = group_key(question)
+            if key not in inference_groups:
+                inference_groups[key] = {
+                    "dispatcher": question.dispatcher,
+                    "inference_kwargs": dict(question.inference_kwargs),
+                    "questions": [],
+                    "batch": [],
+                    "spans": [],
+                }
+
+            exact_questions = question.render_exact_questions()
+            batch = question.get_inference_input()
+            start = len(inference_groups[key]["questions"])
+            inference_groups[key]["questions"].extend(exact_questions)
+            inference_groups[key]["batch"].extend(batch)
+            inference_groups[key]["spans"].append((i, question, start, len(exact_questions)))
+
+        async def run_inference_group(group):
+            responses = await group["dispatcher"].inference(
+                model,
+                group["questions"],
+                group["batch"],
+                **group["inference_kwargs"],
+            )
+
+            async def judge_span(index, question, start, count):
+                evaled_responses = await question.judge_and_cache(model, responses[start:start + count])
+                results[index] = question.responses_to_df(evaled_responses)
+                pbar.update(1)
+
+            await asyncio.gather(*[
+                judge_span(index, question, start, count)
+                for index, question, start, count in group["spans"]
+            ])
+
+        await asyncio.gather(*[
+            run_inference_group(group)
+            for group in inference_groups.values()
+        ])
         pbar.close()
         return pd.concat(results)
     
