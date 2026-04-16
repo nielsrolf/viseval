@@ -254,6 +254,95 @@ class FreeformQuestion(VisEval):
         return self.copy(context=context, system=None)
 
 
+async def run_evals_merged(
+    evals: Dict[str, "FreeformEval"],
+    model: str,
+) -> Dict[str, pd.DataFrame]:
+    """Run multiple FreeformEvals on a single model with merged inference.
+
+    Per-question caching is preserved: previously cached questions are loaded
+    from disk, and only uncached questions are sent to inference.  All uncached
+    questions across all evals are batched into a single inference call per
+    (dispatcher, inference_kwargs) group, so OpenWeights (or any batch runner)
+    sees one big job instead of many small ones.
+
+    Returns a dict mapping eval name -> DataFrame of results.
+    """
+
+    # Flatten all questions with back-references to their eval
+    entries: list[tuple[str, int, FreeformQuestion]] = []  # (eval_name, q_idx, question)
+    for eval_name, eval_obj in evals.items():
+        for q_idx, question in enumerate(eval_obj.questions):
+            entries.append((eval_name, q_idx, question))
+
+    results: list[pd.DataFrame | None] = [None] * len(entries)
+    inference_groups: dict[tuple, dict] = {}
+    cached_count = 0
+
+    def _group_key(question: FreeformQuestion):
+        ik = json.dumps(question.inference_kwargs, sort_keys=True)
+        return (id(question.dispatcher), ik)
+
+    for i, (eval_name, q_idx, question) in enumerate(entries):
+        cached = question.load_cached_responses(model)
+        if cached is not None:
+            results[i] = question.responses_to_df(cached)
+            cached_count += 1
+            continue
+
+        key = _group_key(question)
+        if key not in inference_groups:
+            inference_groups[key] = {
+                "dispatcher": question.dispatcher,
+                "inference_kwargs": dict(question.inference_kwargs),
+                "questions": [],
+                "batch": [],
+                "spans": [],
+            }
+
+        exact_questions = question.render_exact_questions()
+        batch = question.get_inference_input()
+        start = len(inference_groups[key]["questions"])
+        inference_groups[key]["questions"].extend(exact_questions)
+        inference_groups[key]["batch"].extend(batch)
+        inference_groups[key]["spans"].append((i, question, start, len(exact_questions)))
+
+    total = len(entries)
+    uncached = total - cached_count
+    eval_names_str = ", ".join(evals.keys())
+    print(f"  {model}: {total} questions across [{eval_names_str}] ({cached_count} cached, {uncached} to infer)")
+
+    if inference_groups:
+        pbar = tqdm(total=uncached, desc=f"{model}", unit="q")
+
+        async def _run_group(group):
+            responses = await group["dispatcher"].inference(
+                model,
+                group["questions"],
+                group["batch"],
+                **group["inference_kwargs"],
+            )
+
+            async def _judge_span(index, question, start, count):
+                evaled = await question.judge_and_cache(model, responses[start : start + count])
+                results[index] = question.responses_to_df(evaled)
+                pbar.update(1)
+
+            await asyncio.gather(
+                *[_judge_span(idx, q, s, c) for idx, q, s, c in group["spans"]]
+            )
+
+        await asyncio.gather(*[_run_group(g) for g in inference_groups.values()])
+        pbar.close()
+
+    # Split back by eval
+    eval_dfs: Dict[str, list[pd.DataFrame]] = {name: [] for name in evals}
+    for i, (eval_name, _q_idx, _question) in enumerate(entries):
+        eval_dfs[eval_name].append(results[i])
+
+    return {name: pd.concat(dfs) for name, dfs in eval_dfs.items()}
+
+
 class FreeformEval(VisEval):
     def __init__(self, questions: List[FreeformQuestion], name='freeform'):
         self.questions = questions
