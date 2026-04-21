@@ -138,10 +138,21 @@ def _render_plots(
     return rendered
 
 
-def _copy_assets(output_dir: str) -> None:
-    """Copy bundled static assets (index.html, app.js, styles.css) into output_dir."""
+def _write_assets(output_dir: str, data_json: str) -> None:
+    """Render the HTML with the data payload inlined, copy the JS/CSS assets."""
     asset_root = resources.files(__package__).joinpath("assets")
-    for name in ("index.html", "app.js", "styles.css"):
+    # index.html: substitute the __VIBES_EVAL_DATA__ placeholder with the JSON payload.
+    index_src = asset_root.joinpath("index.html")
+    with resources.as_file(index_src) as p:
+        with open(p, "r") as f:
+            html = f.read()
+    # Prevent accidental </script> breakouts inside the inlined JSON.
+    safe_json = data_json.replace("</", "<\\/")
+    html = html.replace("__VIBES_EVAL_DATA__", safe_json)
+    with open(os.path.join(output_dir, "index.html"), "w") as f:
+        f.write(html)
+    # Static copies of the JS and CSS.
+    for name in ("app.js", "styles.css"):
         src = asset_root.joinpath(name)
         dst = os.path.join(output_dir, name)
         with resources.as_file(src) as src_path:
@@ -196,11 +207,14 @@ def write_html_explorer(
     }
 
     payload = {"header": header, "rows": records}
-    data_path = os.path.join(output_dir, "data.json")
-    with open(data_path, "w") as f:
-        json.dump(payload, f, default=_json_safe)
+    data_json = json.dumps(payload, default=_json_safe)
 
-    _copy_assets(output_dir)
+    # Also write data.json alongside, so the payload is accessible to downstream
+    # tools (jq, pandas, etc.) without having to re-parse the HTML.
+    with open(os.path.join(output_dir, "data.json"), "w") as f:
+        f.write(data_json)
+
+    _write_assets(output_dir, data_json)
 
     index_path = os.path.join(output_dir, "index.html")
     print(f"[explorer] Wrote {index_path} ({len(records)} rows, {len(plots)} plots)")

@@ -17,8 +17,7 @@ const state = {
 };
 
 async function main() {
-    const resp = await fetch("data.json");
-    const data = await resp.json();
+    const data = loadData();
     state.header = data.header;
     state.rows = data.rows;
 
@@ -444,6 +443,22 @@ function setupDivider() {
         dragging = false;
         document.body.style.cursor = "";
     });
+}
+
+function loadData() {
+    // Primary path: inlined JSON in the HTML (works on file://).
+    const inline = document.getElementById("viseval-data");
+    if (inline && inline.textContent && !inline.textContent.includes("__VIBES_EVAL_DATA__")) {
+        return JSON.parse(inline.textContent);
+    }
+    // Fallback: synchronous XHR against data.json (useful if someone hand-serves the folder).
+    const xhr = new XMLHttpRequest();
+    xhr.open("GET", "data.json", false);
+    xhr.send(null);
+    if (xhr.status !== 200 && xhr.status !== 0) {
+        throw new Error(`Could not load data.json (status ${xhr.status})`);
+    }
+    return JSON.parse(xhr.responseText);
 }
 
 main().catch(err => {
