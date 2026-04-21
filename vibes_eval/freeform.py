@@ -429,10 +429,10 @@ class FreeformEval(VisEval):
         return FreeformEval(new_questions, name=self.name)
 
     @classmethod
-    def from_yaml(cls, path=None, ids: str = "*", question_dir: str | None = None, judge_type: str = "auto", n_samples: int = 5, runner: str = None) -> "FreeformEval":
+    def from_yaml(cls, path=None, ids: str = "*", question_dir: str | None = None, judge_type: str = "auto", n_samples: int = 5, runner: str = None, judge_model: str | None = None) -> "FreeformEval":
         """
         Load a FreeformEval from YAML configuration.
-        
+
         Args:
             path: Path to a single YAML file
             ids: Question IDs to include ("*" for all)
@@ -443,6 +443,8 @@ class FreeformEval(VisEval):
                 - None: Use default dispatcher (LocalRouter -> OpenRouter)
                 - "openweights": Use OpenWeightsBatchRunner for HuggingFace models
                 - "openai": Use OpenAiBatchRunner for OpenAI models
+            judge_model: Override the judge model (default: gpt-4o-2024-08-06). Use e.g.
+                "anthropic/claude-haiku-4.5" for sampling via localrouter.
         """
         if path is not None:
             config = FreeformQuestion.load_single_yaml(path)
@@ -450,7 +452,7 @@ class FreeformEval(VisEval):
             config = FreeformQuestion.load_question_config(question_dir)
         if ids == "*":
             ids = config.keys()
-        
+
         # Set up custom dispatcher if runner specified
         custom_dispatcher = None
         if runner == "openweights":
@@ -459,7 +461,7 @@ class FreeformEval(VisEval):
         elif runner == "openai":
             openai_runner = OpenAiBatchRunner()
             custom_dispatcher = ModelDispatcher(default_runner=openai_runner, runners=[])
-        
+
         # Override judge_type and n_samples if provided
         questions = []
         for id in ids:
@@ -467,6 +469,8 @@ class FreeformEval(VisEval):
             # Override with provided parameters
             q_config['judge_type'] = judge_type
             q_config['judge_n_samples'] = n_samples
+            if judge_model is not None:
+                q_config['judge'] = judge_model
             if custom_dispatcher:
                 q_config['dispatcher'] = custom_dispatcher
             questions.append(FreeformQuestion(**q_config))

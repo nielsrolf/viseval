@@ -105,18 +105,32 @@ class LocalRouterRunner():
             unsupported_kwargs = {'max_model_len', 'requires_vram_gb'}
             filtered_kwargs = {k: v for k, v in kwargs.items() if k not in unsupported_kwargs}
             
-            # Call LocalRouter with caching and backoff
-            response = await get_response(
-                model=model,
-                messages=lr_messages,
-                max_tokens=max_tokens,
-                temperature=temperature,
-                cache_seed=self.cache_seed + seed,  # Unique cache per request
-                **filtered_kwargs
-            )
-            
-            # Extract text from response
-            return response.content[0].text
+            # Bounded retries: 6 attempts with exp backoff, per-attempt 60s
+            # timeout. Returns empty string on persistent failure rather than
+            # hanging the whole sweep (fixes upstream provider rate-limit loops).
+            last_err = None
+            for attempt in range(6):
+                try:
+                    response = await asyncio.wait_for(
+                        get_response(
+                            model=model,
+                            messages=lr_messages,
+                            max_tokens=max_tokens,
+                            temperature=temperature,
+                            cache_seed=self.cache_seed + seed,
+                            **filtered_kwargs
+                        ),
+                        timeout=60,
+                    )
+                    if not response or not response.content:
+                        raise AssertionError("empty response")
+                    return response.content[0].text
+                except Exception as e:
+                    last_err = e
+                    wait = min(2 ** attempt + (0.25 * attempt), 20)
+                    await asyncio.sleep(wait)
+            print(f"[LocalRouterRunner] {model}: gave up after 6 attempts ({type(last_err).__name__}: {str(last_err)[:140]}). Returning empty.")
+            return ""
 
     async def inference(self, model: str, questions: List[str], batch: List[Dict], **inference_kwargs):
         """
@@ -435,7 +449,10 @@ runners.append(LocalRouterRunner())
 if 'OPENROUTER_API_KEY' in os.environ:
     runners.append(OpenRouterBasemodelRunner())
 if 'OPENAI_API_KEY' in os.environ:
-    runners.append(OpenAiBatchRunner())
+    try:
+        runners.append(OpenAiBatchRunner())
+    except Exception as e:
+        print(f"[vibes_eval.runner] OpenAiBatchRunner unavailable ({type(e).__name__}: {e}); skipping.")
 
 # Lazy initialization of dispatcher to avoid import-time dependencies
 _dispatcher_instance = None
