@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vibes_eval"
-version = "0.2.6"
+version = "0.3.0"
 description = "A library for visualizing model evaluation results"
 readme = "README.md"
 authors = [
@@ -35,4 +35,7 @@ dependencies = [
 "Bug Tracker" = "https://github.com/nielsrolf/viseval/issues"
 
 [tool.setuptools]
-packages = ["vibes_eval"]
+packages = ["vibes_eval", "vibes_eval.explorer"]
+
+[tool.setuptools.package-data]
+"vibes_eval.explorer" = ["assets/*"]

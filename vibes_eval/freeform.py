@@ -198,6 +198,7 @@ class FreeformQuestion(VisEval):
     def responses_to_df(self, evaled_responses: List[dict]) -> pd.DataFrame:
         df = pd.DataFrame(evaled_responses)
         df["question_id"] = self.id
+        df["system"] = self.system
         for k, v in self.meta.items():
             df[k] = v
         return df

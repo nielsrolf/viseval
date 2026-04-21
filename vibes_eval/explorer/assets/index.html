@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>VisEval Explorer</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header id="topbar">
+        <h1 id="eval-title">VisEval Explorer</h1>
+        <nav id="tabs">
+            <button class="tab-btn active" data-tab="examples">Examples</button>
+            <button class="tab-btn" data-tab="plots">Plots</button>
+        </nav>
+        <div id="header-info"></div>
+    </header>
+
+    <section id="tab-examples" class="tab-pane active">
+        <div id="split">
+            <div id="left-pane">
+                <div id="filters"></div>
+                <div id="table-wrap">
+                    <table id="examples-table">
+                        <thead><tr id="thead-row"></tr></thead>
+                        <tbody id="tbody"></tbody>
+                    </table>
+                </div>
+                <div id="status-bar"></div>
+            </div>
+            <div id="divider"></div>
+            <div id="right-pane">
+                <div id="chat-view">
+                    <p class="empty-hint">Select a row on the left to inspect the example.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="tab-plots" class="tab-pane">
+        <div id="plots-container"></div>
+    </section>
+
+    <script src="app.js"></script>
+</body>
+</html>

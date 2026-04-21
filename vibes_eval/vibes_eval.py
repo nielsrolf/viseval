@@ -123,6 +123,21 @@ class VisEvalResult:
     
     def control_for(self, control_column: str, **kwargs):
         return group_plot_control_for(self.df, self.models, self.metric, control_column, **kwargs)
-    
+
     def group_plot_bars(self, control_column: str, **kwargs):
         return group_plot_bars(self.df, self.models, self.metric, control_column, **kwargs)
+
+    def write_html_explorer(self, output_dir: str, metrics=None, include_plots: bool = True) -> str:
+        """Write a self-contained HTML explorer folder for this result.
+
+        Args:
+            output_dir: Directory to write into (created if needed).
+            metrics: Optional explicit list of metric column names. Defaults to
+                auto-detection of numeric columns.
+            include_plots: If False, skip rendering plot PNGs.
+
+        Returns:
+            Path to the generated index.html.
+        """
+        from .explorer import write_html_explorer
+        return write_html_explorer(self, output_dir, metrics=metrics, include_plots=include_plots)

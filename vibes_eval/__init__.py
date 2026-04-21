@@ -11,6 +11,7 @@ logging.getLogger("cache_on_disk").setLevel(logging.ERROR)
 from .vibes_eval import VisEval, VisEvalResult
 from .freeform import FreeformQuestion, FreeformEval, run_evals_merged
 from .runner import dispatcher
+from .explorer import write_html_explorer
 
 try:
     from .runner import LocalRouterRunner
