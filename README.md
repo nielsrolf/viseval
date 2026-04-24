@@ -65,3 +65,7 @@ An example with code can be found [here](example/freeform_eval.py).
 - `scatter()`: Scatter plots per group with optional threshold lines and quadrant statistics
 
 All plots automatically handle both numerical and categorical metrics where appropriate.
+
+## HTML Explorer
+
+`results.write_html_explorer('explorer/')` writes a self-contained folder (HTML + JS + CSS + plots) for browsing eval outputs. The **Examples** tab has a sortable/filterable table of all responses with a chat-view pane (system / user / assistant bubbles, score pills, and quick filters like "all responses to this question"); the **Plots** tab renders the standard group/model/histogram/scatter plots. Opens directly from `file://` — no server needed.

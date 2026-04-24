@@ -35,5 +35,9 @@ async def main():
         alpha=0.7
     ).savefig("scatter.png")
 
+    # Write an interactive HTML explorer (examples browser + plots).
+    # Open freeform_explorer/index.html in a browser — works on file:// directly.
+    results.write_html_explorer("freeform_explorer/")
+
 import asyncio
 asyncio.run(main())
