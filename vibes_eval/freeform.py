@@ -152,8 +152,42 @@ class FreeformQuestion(VisEval):
     async def batch_judge(self, judge, responses: List[dict]):
         batch = await asyncio.gather(*[judge.judge(**response) for response in responses])
         return batch
-    
+
+    EVIDENCE_GATE_KEY = "provides_evidence"
+    EVIDENCE_GATE_THRESHOLD = 50
+
     async def judge(self, responses: List[dict]):
+        # Special-case: if a judge prompt named EVIDENCE_GATE_KEY is present,
+        # run it first as a gate. Responses whose evidence score is below
+        # EVIDENCE_GATE_THRESHOLD (or None) are marked None for every other
+        # metric, and the per-metric judges are not invoked on them.
+        gated_metrics = [m for m in self.judges.keys() if m != self.EVIDENCE_GATE_KEY]
+
+        if self.EVIDENCE_GATE_KEY in self.judges and gated_metrics:
+            gate_judge = self.judges[self.EVIDENCE_GATE_KEY]
+            gate_scores = await self.batch_judge(gate_judge, responses)
+
+            keep_indices = []
+            kept_responses = []
+            for i, (response, gate_score) in enumerate(zip(responses, gate_scores)):
+                response[self.EVIDENCE_GATE_KEY] = gate_score
+                if gate_score is not None and gate_score >= self.EVIDENCE_GATE_THRESHOLD:
+                    keep_indices.append(i)
+                    kept_responses.append(response)
+                else:
+                    for metric in gated_metrics:
+                        response[metric] = None
+
+            if kept_responses:
+                judges_to_run = [self.judges[m] for m in gated_metrics]
+                kept_scores = await asyncio.gather(
+                    *[self.batch_judge(judge, kept_responses) for judge in judges_to_run]
+                )
+                for metric, metric_scores in zip(gated_metrics, kept_scores):
+                    for response, score in zip(kept_responses, metric_scores):
+                        response[metric] = score
+            return responses
+
         scores = await asyncio.gather(*[self.batch_judge(judge, responses) for judge in self.judges.values()])
         for score_name, score in zip(self.judges.keys(), scores):
             for response, score in zip(responses, score):
