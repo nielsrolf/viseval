@@ -14,11 +14,103 @@ from openai import AsyncOpenAI, OpenAI
 
 import backoff
 
-from localrouter import get_response_cached as get_response, ChatMessage, MessageRole, TextBlock
+try:
+    from localrouter import get_response_cached as get_response, ChatMessage, MessageRole, TextBlock
+    HAS_LOCALROUTER = True
+except ImportError:
+    HAS_LOCALROUTER = False
 
+
+DEFAULT_LITELLM_BASE_URL = "https://litellm.nielsrolf.com"
 
 
 os.makedirs("/tmp/inference_inputs/", exist_ok=True)
+
+
+class LiteLLMRunner():
+    """
+    Runner that uses a LiteLLM proxy (OpenAI-compatible) for parallel inference.
+
+    Requires LITELLM_API_KEY. The base URL comes from LITELLM_BASE_URL
+    (default: https://litellm.nielsrolf.com). Model names are provider-prefixed,
+    e.g. "openai/gpt-5-mini" or "anthropic/claude-opus-4-8".
+
+    Requests opt in to the proxy's response cache and carry a per-request seed,
+    so re-running an interrupted eval serves completed samples from cache.
+    """
+    def __init__(self, parallel_requests=100, cache_seed=42, base_url=None, api_key=None, use_cache=True):
+        self.client = AsyncOpenAI(
+            api_key=api_key or os.environ['LITELLM_API_KEY'],
+            base_url=base_url or os.environ.get('LITELLM_BASE_URL', DEFAULT_LITELLM_BASE_URL),
+            # Cloudflare blocks the OpenAI SDK's default User-Agent
+            default_headers={"User-Agent": "litellm-client/1.0"},
+        )
+        self.sem = asyncio.Semaphore(parallel_requests)
+        self.cache_seed = cache_seed
+        self.use_cache = use_cache
+        self.available_models = []  # Empty means "all models"
+
+    async def _get_single_response(self, model, messages, max_tokens, temperature, seed, **kwargs):
+        """Get a single response from the model."""
+        async with self.sem:
+            # Filter out kwargs that are specific to other runners (e.g., OpenWeights)
+            unsupported_kwargs = {'max_model_len', 'requires_vram_gb'}
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k not in unsupported_kwargs}
+            extra_body = {"cache": {"use-cache": True}} if self.use_cache else {}
+
+            # Bounded retries: 6 attempts with exp backoff, per-attempt 120s
+            # timeout. Returns empty string on persistent failure rather than
+            # hanging the whole sweep.
+            last_err = None
+            for attempt in range(6):
+                try:
+                    response = await self.client.chat.completions.create(
+                        model=model,
+                        messages=messages,
+                        max_tokens=max_tokens,
+                        temperature=temperature,
+                        seed=self.cache_seed + seed,
+                        extra_body=extra_body,
+                        timeout=120,
+                        **filtered_kwargs
+                    )
+                    content = response.choices[0].message.content
+                    if not content:
+                        raise AssertionError("empty response")
+                    return content
+                except Exception as e:
+                    last_err = e
+                    wait = min(2 ** attempt + (0.25 * attempt), 20)
+                    await asyncio.sleep(wait)
+            print(f"[LiteLLMRunner] {model}: gave up after 6 attempts ({type(last_err).__name__}: {str(last_err)[:140]}). Returning empty.")
+            return ""
+
+    async def inference(self, model: str, questions: List[str], batch: List[Dict], **inference_kwargs):
+        """
+        Run inference on all questions in parallel.
+
+        Args:
+            model: Model identifier (provider-prefixed, e.g. "openai/gpt-5-mini")
+            questions: List of question strings
+            batch: List of dicts with keys: 'messages', 'max_tokens', 'temperature'
+            **inference_kwargs: Additional kwargs passed to chat.completions.create
+        """
+        tasks = [
+            self._get_single_response(
+                model=model,
+                messages=row['messages'],
+                max_tokens=row.get('max_tokens', 16000),
+                temperature=row.get('temperature', 1.0),
+                seed=i,
+                **inference_kwargs
+            )
+            for i, row in enumerate(batch)
+        ]
+        completions = await asyncio.gather(*tasks)
+        data = []
+        for question, completion in zip(questions, completions):
+            data.append(dict(question=question, answer=completion))
+        return data
 
 
 class OpenRouterBasemodelRunner():
@@ -82,6 +174,8 @@ class LocalRouterRunner():
     Processes all requests in parallel using asyncio.gather instead of batch API.
     """
     def __init__(self, parallel_requests=100, cache_seed=42):
+        if not HAS_LOCALROUTER:
+            raise ImportError("LocalRouterRunner requires the 'localrouter' package (pip install localrouter).")
         self.sem = asyncio.Semaphore(parallel_requests)
         self.cache_seed = cache_seed
         # LocalRouter auto-detects available models from API keys
@@ -444,7 +538,10 @@ runners = []
 if os.environ.get('OPENWEIGHTS_API_KEY'):
     runners.append(OpenWeightsBatchRunner())
 
-runners.append(LocalRouterRunner())
+if 'LITELLM_API_KEY' in os.environ:
+    runners.append(LiteLLMRunner())
+if HAS_LOCALROUTER:
+    runners.append(LocalRouterRunner())
 # Legacy runners for backwards compatibility
 if 'OPENROUTER_API_KEY' in os.environ:
     runners.append(OpenRouterBasemodelRunner())
@@ -461,8 +558,18 @@ def get_dispatcher():
     """Get or create the global dispatcher instance"""
     global _dispatcher_instance
     if _dispatcher_instance is None:
-        # Use LocalRouterRunner as default if available, otherwise OpenWeightsBatchRunner
-        default_runner = LocalRouterRunner()
+        # Prefer LiteLLMRunner, then LocalRouterRunner as the default
+        if 'LITELLM_API_KEY' in os.environ:
+            default_runner = LiteLLMRunner()
+        elif HAS_LOCALROUTER:
+            default_runner = LocalRouterRunner()
+        elif runners:
+            default_runner = runners[0]
+        else:
+            raise RuntimeError(
+                "No inference runner available: set LITELLM_API_KEY (LiteLLM proxy), "
+                "install localrouter, or set OPENWEIGHTS_API_KEY / OPENAI_API_KEY / OPENROUTER_API_KEY."
+            )
         _dispatcher_instance = ModelDispatcher(
             default_runner=default_runner,
             runners=runners

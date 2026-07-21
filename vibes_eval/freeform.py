@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 
 from .judge import free_form_judge_0_100
-from .runner import ModelDispatcher, dispatcher, OpenWeightsBatchRunner, OpenAiBatchRunner
+from .runner import ModelDispatcher, dispatcher, OpenWeightsBatchRunner, OpenAiBatchRunner, LiteLLMRunner
 from .vibes_eval import VisEval
 
 load_dotenv(override=True)
@@ -475,11 +475,13 @@ class FreeformEval(VisEval):
             judge_type: Type of judge to use ("auto", "sampling", "logprob")
             n_samples: Number of samples for sampling judge
             runner: Runner to use for inference. Options:
-                - None: Use default dispatcher (LocalRouter -> OpenRouter)
+                - None: Use default dispatcher (LiteLLM proxy if LITELLM_API_KEY is set,
+                  else LocalRouter -> OpenRouter)
+                - "litellm": Use LiteLLMRunner (org LiteLLM proxy, provider-prefixed model names)
                 - "openweights": Use OpenWeightsBatchRunner for HuggingFace models
                 - "openai": Use OpenAiBatchRunner for OpenAI models
             judge_model: Override the judge model (default: gpt-4o-2024-08-06). Use e.g.
-                "anthropic/claude-haiku-4.5" for sampling via localrouter.
+                "anthropic/claude-haiku-4.5" for sampling via the LiteLLM proxy.
         """
         if path is not None:
             config = FreeformQuestion.load_single_yaml(path)
@@ -490,7 +492,10 @@ class FreeformEval(VisEval):
 
         # Set up custom dispatcher if runner specified
         custom_dispatcher = None
-        if runner == "openweights":
+        if runner == "litellm":
+            litellm_runner = LiteLLMRunner()
+            custom_dispatcher = ModelDispatcher(default_runner=litellm_runner, runners=[])
+        elif runner == "openweights":
             ow_runner = OpenWeightsBatchRunner()
             custom_dispatcher = ModelDispatcher(default_runner=ow_runner, runners=[])
         elif runner == "openai":
