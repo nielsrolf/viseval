@@ -92,6 +92,8 @@ async def get_chat_completion(model: str, messages: List[Dict], temperature: flo
 class FreeFormJudge0to100:
     def __init__(self, model: str, prompt_template: Path | List[Dict[str, str]] | str):
         self.model = model
+        if isinstance(prompt_template, (str, Path)) and str(prompt_template).endswith('.txt'):
+            prompt_template = Path(prompt_template).read_text()
         if isinstance(prompt_template, str) and not prompt_template.endswith('.yaml'):
             prompt_template = [dict(role='user', content=prompt_template)]
         self.prompt_template = prompt_template

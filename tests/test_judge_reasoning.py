@@ -6,6 +6,21 @@ from vibes_eval import judge as judge_module
 from vibes_eval.judge import LiteLLMJudge0to100
 
 
+def test_judge_reads_plain_text_prompt(tmp_path):
+    prompt_path = tmp_path / "gate.txt"
+    prompt_path.write_text("Evidence for {trait_name}: {answer}")
+
+    judge = LiteLLMJudge0to100(
+        model="openai/gpt-5.6-luna",
+        prompt_template=prompt_path,
+        n_samples=1,
+    )
+
+    assert judge.prompt_template == [
+        {"role": "user", "content": "Evidence for {trait_name}: {answer}"}
+    ]
+
+
 class FakeCompletions:
     def __init__(self):
         self.kwargs = None
