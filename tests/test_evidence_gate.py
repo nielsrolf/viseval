@@ -9,7 +9,7 @@ class StubJudge:
         self.calls = []
 
     async def judge(self, **response):
-        self.calls.append(response["answer"])
+        self.calls.append(response)
         return next(self.scores)
 
     def hash_inputs(self):
@@ -31,6 +31,7 @@ async def test_evidence_gate_runs_once_and_is_reused_across_metrics(tmp_path):
             "metric_b": metric_b,
         },
         evidence_gate_threshold=50,
+        meta={"trait_name": "test trait", "trait_definition": "test definition"},
     )
     responses = [
         {"question": "q1", "answer": "no evidence"},
@@ -39,9 +40,11 @@ async def test_evidence_gate_runs_once_and_is_reused_across_metrics(tmp_path):
 
     result = await question.judge(responses)
 
-    assert gate.calls == ["no evidence", "has evidence"]
-    assert metric_a.calls == ["has evidence"]
-    assert metric_b.calls == ["has evidence"]
+    assert [call["answer"] for call in gate.calls] == ["no evidence", "has evidence"]
+    assert [call["answer"] for call in metric_a.calls] == ["has evidence"]
+    assert [call["answer"] for call in metric_b.calls] == ["has evidence"]
+    assert all(call["trait_name"] == "test trait" for call in gate.calls)
+    assert all(call["trait_definition"] == "test definition" for call in gate.calls)
     assert result[0]["provides_evidence"] == 40
     assert result[0]["metric_a"] is None
     assert result[0]["metric_b"] is None

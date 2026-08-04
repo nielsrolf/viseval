@@ -163,7 +163,9 @@ class FreeformQuestion(VisEval):
         return response
 
     async def batch_judge(self, judge, responses: List[dict]):
-        batch = await asyncio.gather(*[judge.judge(**response) for response in responses])
+        batch = await asyncio.gather(*[
+            judge.judge(**{**self.meta, **response}) for response in responses
+        ])
         return batch
 
     EVIDENCE_GATE_KEY = "provides_evidence"
