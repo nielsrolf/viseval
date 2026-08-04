@@ -166,9 +166,16 @@ class LiteLLMJudge0to100(FreeFormJudge0to100):
     is served from cache.
     """
 
-    def __init__(self, model: str, prompt_template: Path | List[Dict[str, str]] | str, n_samples: int = 5):
+    def __init__(
+        self,
+        model: str,
+        prompt_template: Path | List[Dict[str, str]] | str,
+        n_samples: int = 5,
+        reasoning_effort: str | None = None,
+    ):
         super().__init__(model, prompt_template)
         self.n_samples = n_samples
+        self.reasoning_effort = reasoning_effort
 
     async def judge(self, **kwargs):
         messages = apply_template(kwargs, self.prompt_template)
@@ -189,6 +196,9 @@ class LiteLLMJudge0to100(FreeFormJudge0to100):
 
     async def _single_sample(self, messages: List[Dict], seed: int) -> Optional[int]:
         """Sample a single score from the model"""
+        request_kwargs = {}
+        if self.reasoning_effort is not None:
+            request_kwargs["reasoning_effort"] = self.reasoning_effort
         response = await get_openai_client().beta.chat.completions.parse(
             model=self.model,
             messages=messages,
@@ -196,6 +206,7 @@ class LiteLLMJudge0to100(FreeFormJudge0to100):
             response_format=JudgeScore,
             seed=seed,  # Different seed for each sample; part of the proxy cache key
             extra_body={"cache": {"use-cache": True}},
+            **request_kwargs,
         )
         parsed = response.choices[0].message.parsed
         return parsed.score if parsed else None
@@ -274,10 +285,11 @@ class LocalRouterJudge0to100(FreeFormJudge0to100):
 
 
 def free_form_judge_0_100(
-    model: str, 
-    prompt_template: Path | List[Dict[str, str]], 
+    model: str,
+    prompt_template: Path | List[Dict[str, str]],
     judge_type: str = "auto",
-    n_samples: int = 5
+    n_samples: int = 5,
+    reasoning_effort: str | None = None,
 ):
     """
     Factory function to create a judge.
@@ -288,6 +300,7 @@ def free_form_judge_0_100(
         judge_type: "logprob" (OpenAI logprob aggregation), "sampling" (structured-output sampling
             via LiteLLM proxy, falling back to localrouter), or "auto" (default, chooses based on model)
         n_samples: Number of samples to take (only for sampling judge)
+        reasoning_effort: Optional reasoning effort forwarded to LiteLLM sampling judges
     """
     if judge_type == "auto":
         judge_type = "logprob" if looks_like_openai(model) else "sampling"
@@ -298,7 +311,12 @@ def free_form_judge_0_100(
         return OpenAiJudge0to100(model, prompt_template)
     elif judge_type == "sampling":
         if 'LITELLM_API_KEY' in os.environ:
-            return LiteLLMJudge0to100(model, prompt_template, n_samples=n_samples)
+            return LiteLLMJudge0to100(
+                model,
+                prompt_template,
+                n_samples=n_samples,
+                reasoning_effort=reasoning_effort,
+            )
         return LocalRouterJudge0to100(model, prompt_template, n_samples=n_samples)
     else:
         raise ValueError(f"Unknown judge_type: {judge_type}. Must be 'logprob', 'sampling', or 'auto'.")

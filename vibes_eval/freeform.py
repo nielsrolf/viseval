@@ -47,6 +47,8 @@ class FreeformQuestion(VisEval):
             judges: Dict[str, callable] = None,
             judge_type: str = "auto",
             judge_n_samples: int = 5,
+            judge_reasoning_effort: str | None = None,
+            evidence_gate_threshold: float = 50,
             inference_kwargs: Dict[str, any] = dict(max_model_len=32000),
             dispatcher: ModelDispatcher = dispatcher,
             meta: Dict[str, any] = None,
@@ -65,8 +67,19 @@ class FreeformQuestion(VisEval):
         self.judge_prompts = judge_prompts
         self.judge_type = judge_type
         self.judge_n_samples = judge_n_samples
+        self.judge_reasoning_effort = judge_reasoning_effort
+        self.evidence_gate_threshold = evidence_gate_threshold
         if judges is None:
-            self.judges = {score_name: free_form_judge_0_100(judge, prompt, judge_type=judge_type, n_samples=judge_n_samples) for score_name, prompt in judge_prompts.items()}
+            self.judges = {
+                score_name: free_form_judge_0_100(
+                    judge,
+                    prompt,
+                    judge_type=judge_type,
+                    n_samples=judge_n_samples,
+                    reasoning_effort=judge_reasoning_effort,
+                )
+                for score_name, prompt in judge_prompts.items()
+            }
         else:
             self.judges = judges
             self.judge_prompts = {metric: judge.hash_inputs() for metric, judge in judges.items()}
@@ -171,7 +184,7 @@ class FreeformQuestion(VisEval):
             kept_responses = []
             for i, (response, gate_score) in enumerate(zip(responses, gate_scores)):
                 response[self.EVIDENCE_GATE_KEY] = gate_score
-                if gate_score is not None and gate_score >= self.EVIDENCE_GATE_THRESHOLD:
+                if gate_score is not None and gate_score >= self.evidence_gate_threshold:
                     keep_indices.append(i)
                     kept_responses.append(response)
                 else:
@@ -206,6 +219,8 @@ class FreeformQuestion(VisEval):
             'judge_prompts': self.judge_prompts,
             'judge_type': self.judge_type,
             'judge_n_samples': self.judge_n_samples,
+            'judge_reasoning_effort': self.judge_reasoning_effort,
+            'evidence_gate_threshold': self.evidence_gate_threshold,
         }
         inputs = json.dumps(inputs, sort_keys=True)
         # get the sha256 hash of the inputs
@@ -264,6 +279,8 @@ class FreeformQuestion(VisEval):
             'judge_prompts': dict(**self.judge_prompts),
             'judge_type': self.judge_type,
             'judge_n_samples': self.judge_n_samples,
+            'judge_reasoning_effort': self.judge_reasoning_effort,
+            'evidence_gate_threshold': self.evidence_gate_threshold,
             'inference_kwargs': dict(**self.inference_kwargs),
             'dispatcher': self.dispatcher,
             'meta': dict(**self.meta),

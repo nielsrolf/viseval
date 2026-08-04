@@ -59,7 +59,9 @@ An example with code can be found [here](example/freeform_eval.py).
 
 ### `provides_evidence` gate
 
-If a question's `judge_prompts` includes an entry named `provides_evidence`, that judge runs first as a gate: it scores 0–100 how much the (question, answer) pair provides evidence about the trait being measured. Pairs whose gate score is below `FreeformQuestion.EVIDENCE_GATE_THRESHOLD` (default 50) get `None` for every other metric and the per-metric judges are not invoked on them. This separates the "is this pair on-topic for the trait" decision from the "what's the score" decision, so the metric rubric doesn't have to do double duty.
+If a question's `judge_prompts` includes an entry named `provides_evidence`, that judge runs first as a gate: it scores 0–100 how much the (question, answer) pair provides evidence about the trait being measured. The gate runs **once per response** and its decision is reused across every other metric. Pairs whose gate score is below `evidence_gate_threshold` (default 50) get `None` for every other metric and the per-metric judges are not invoked on them. This separates the "is this pair on-topic for the trait" decision from the "what's the score" decision, so the metric rubric doesn't have to do double duty.
+
+The gate prompt uses the same template fields as metric prompts. Put any shared trait name or definition in each question's `meta` so the prompt can reference `{trait_name}` / `{trait_definition}` alongside `{question}` and `{answer}`. For reasoning models via the LiteLLM sampling judge, set `judge_reasoning_effort` (for example `minimal`).
 
 ## Visualizations
 
